@@ -5,7 +5,11 @@ const db = require('./database');
 
 // Configuration
 const MASTER_ROOT = path.join(__dirname, 'Master');
-const SESSION_FOLDERS = ['2025_and_2026', '2026_and_2027']; // Order matters! First one takes precedence.
+// Scan Master folder for session directories automatically
+const SESSION_FOLDERS = fs.readdirSync(MASTER_ROOT).filter(f => fs.statSync(path.join(MASTER_ROOT, f)).isDirectory());
+// Sort them naturally so older sessions are processed first
+SESSION_FOLDERS.sort(); 
+
 
 // Classes to look for in each folder
 const CLASSES = ['JSS1', 'JSS2', 'JSS3', 'SSS1', 'SSS2', 'SSS3'];
