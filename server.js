@@ -5,6 +5,7 @@ const path = require('path');
 const xlsx = require('xlsx');
 const fs = require('fs');
 const db = require('./database');
+const bcrypt = require('bcrypt');
 
 const app = express();
 const PORT = 3000;
@@ -321,16 +322,17 @@ app.post('/login', (req, res) => {
         }
 
         // 4. Validate Surname
-        const storedSurname = (student.surname || '').toString().trim().toUpperCase();
-        console.log(`Check: Input='${cleanPass}', Database='${storedSurname}'`);
+        const storedHash = (student.surname || '').toString().trim();
+        console.log(`Check: Input='${cleanPass}', Hash='${storedHash}'`);
 
-        if (storedSurname === cleanPass) {
+        const match = bcrypt.compareSync(cleanPass, storedHash);
+
+        if (match) {
             console.log(`Success: Logged in as ${student.surname}`);
             req.session.student = student;
             res.redirect('/dashboard');
         } else {
             console.warn(`Attempt failed: Incorrect surname for [${cleanAdm}].`);
-            // The user asked to know if it's the password that is wrong
             return res.render('login', { 
                 error: `Incorrect Surname for Admission No ${cleanAdm}. Please check your spelling.` 
             });

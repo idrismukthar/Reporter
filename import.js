@@ -2,6 +2,7 @@ const xlsx = require('xlsx');
 const fs = require('fs');
 const path = require('path');
 const db = require('./database');
+const bcrypt = require('bcrypt');
 
 // Configuration
 const MASTER_ROOT = path.join(__dirname, 'Master');
@@ -115,7 +116,11 @@ const runImport = () => {
                         const admission_no = getValue(row, 'admission_no');
                         if (!admission_no) return;
 
-                        const surname = getValue(row, 'surname');
+                        let surname = getValue(row, 'surname');
+                        if (surname) {
+                            // Hash the surname (case-insensitive for convenience)
+                            surname = bcrypt.hashSync(surname.toString().trim().toUpperCase(), 10);
+                        }
                         const m_name = getValue(row, 'm_name');
                         const l_name = getValue(row, 'l_name');
                         const url = getValue(row, 'url');
