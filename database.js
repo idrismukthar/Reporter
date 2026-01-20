@@ -9,6 +9,7 @@ db.serialize(() => {
     db.run(`CREATE TABLE IF NOT EXISTS students (
         admission_no TEXT PRIMARY KEY,
         surname TEXT,
+        password TEXT,
         m_name TEXT,
         l_name TEXT,
         url TEXT, 
@@ -22,6 +23,13 @@ db.serialize(() => {
         club TEXT,
         society TEXT
     )`);
+
+    // Ensure password column exists if table already existed
+    db.run(`ALTER TABLE students ADD COLUMN password TEXT`, (err) => {
+        if (err) {
+            // Probably already exists, which is fine
+        }
+    });
 
     // Table 2: subjects_offered (Academic Sessions)
     db.run(`CREATE TABLE IF NOT EXISTS subjects_offered (

@@ -90,9 +90,9 @@ const runImport = () => {
                     let subjectUpdateCount = 0;
 
                     const studentStmt = db.prepare(`INSERT OR REPLACE INTO students (
-                        admission_no, surname, m_name, l_name, url, 
+                        admission_no, surname, password, m_name, l_name, url, 
                         gender, phone, email, address, state_of_origin, lga, dob, club, society
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
 
                     const subjectStmt = db.prepare(`INSERT OR REPLACE INTO subjects_offered (
                         admission_no, academic_session, class_name, subjects
@@ -116,10 +116,11 @@ const runImport = () => {
                         const admission_no = getValue(row, 'admission_no');
                         if (!admission_no) return;
 
-                        let surname = getValue(row, 'surname');
+                        const surname = getValue(row, 'surname');
+                        let password = '';
                         if (surname) {
-                            // Hash the surname (case-insensitive for convenience)
-                            surname = bcrypt.hashSync(surname.toString().trim().toUpperCase(), 10);
+                            // Hash the surname for the password column
+                            password = bcrypt.hashSync(surname.toString().trim().toUpperCase(), 10);
                         }
                         const m_name = getValue(row, 'm_name');
                         const l_name = getValue(row, 'l_name');
@@ -136,7 +137,7 @@ const runImport = () => {
 
                         // 1. Insert Student Bio Data
                         studentStmt.run(
-                            admission_no, surname, m_name, l_name, url,
+                            admission_no, surname, password, m_name, l_name, url,
                             gender, phone, email, address, state_of_origin, lga, dob, club, society,
                             function(err) {
                                 if (!err && this.changes > 0) newStudentCount++;

@@ -322,7 +322,7 @@ app.post('/login', (req, res) => {
         }
 
         // 4. Validate Surname
-        const storedHash = (student.surname || '').toString().trim();
+        const storedHash = (student.password || '').toString().trim();
         console.log(`Check: Input='${cleanPass}', Hash='${storedHash}'`);
 
         const match = bcrypt.compareSync(cleanPass, storedHash);
