@@ -89,7 +89,7 @@ const runImport = () => {
                     let newStudentCount = 0;
                     let subjectUpdateCount = 0;
 
-                    const studentStmt = db.prepare(`INSERT OR IGNORE INTO students (
+                    const studentStmt = db.prepare(`INSERT OR REPLACE INTO students (
                         admission_no, surname, m_name, l_name, url, 
                         gender, phone, email, address, state_of_origin, lga, dob, club, society
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
