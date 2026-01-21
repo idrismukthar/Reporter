@@ -61,25 +61,22 @@ function getValue(row, keyName) {
     return undefined;
 }
 
-const runImport = () => {
+const runImport = async () => {
     console.log("🚀 Starting Bulk Import...");
 
-    db.serialize(() => {
-        
-        SESSION_FOLDERS.forEach(sessionFolder => {
+    try {
+        for (const sessionFolder of SESSION_FOLDERS) {
             const folderPath = path.join(MASTER_ROOT, sessionFolder);
             if (!fs.existsSync(folderPath)) {
                 console.log(`⚠️ Folder not found: ${sessionFolder}`);
-                return;
+                continue;
             }
 
             console.log(`\n📂 Processing Session Folder: ${sessionFolder}`);
 
-            CLASSES.forEach(className => {
+            for (const className of CLASSES) {
                 const filePath = path.join(folderPath, `${className}.xlsx`);
-                if (!fs.existsSync(filePath)) {
-                    return;
-                }
+                if (!fs.existsSync(filePath)) continue;
 
                 try {
                     const wb = xlsx.readFile(filePath);
@@ -89,16 +86,7 @@ const runImport = () => {
                     let newStudentCount = 0;
                     let subjectUpdateCount = 0;
 
-                    const studentStmt = db.prepare(`INSERT OR REPLACE INTO students (
-                        admission_no, surname, password, m_name, l_name, url, 
-                        gender, phone, email, address, state_of_origin, lga, dob, club, society
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
-
-                    const subjectStmt = db.prepare(`INSERT OR REPLACE INTO subjects_offered (
-                        admission_no, academic_session, class_name, subjects
-                    ) VALUES (?, ?, ?, ?)`);
-
-                    // Identify Subject Columns (Everything NOT in bio-data aliases)
+                    // Bio Aliases for Subject Filtering
                     const bioAliases = [
                         'admission_no', 'admission no', 'adm_no',
                         'surname', 'm_name', 'middle_name', 'l_name', 'last_name',
@@ -112,65 +100,79 @@ const runImport = () => {
                         return !bioAliases.some(alias => cleanH.includes(alias) || alias.includes(cleanH));
                     });
 
-                    data.forEach(row => {
+                    // We wrap DB calls in Promises to await them
+                    for (const row of data) {
                         const admission_no = getValue(row, 'admission_no');
-                        if (!admission_no) return;
+                        if (!admission_no) continue;
 
                         const surname = getValue(row, 'surname');
                         let password = '';
                         if (surname) {
-                            // Hash the surname for the password column
                             password = bcrypt.hashSync(surname.toString().trim().toUpperCase(), 10);
                         }
-                        const m_name = getValue(row, 'm_name');
-                        const l_name = getValue(row, 'l_name');
-                        const url = getValue(row, 'url');
-                        const gender = getValue(row, 'gender');
-                        const phone = getValue(row, 'phone');
-                        const email = getValue(row, 'email');
-                        const address = getValue(row, 'address');
-                        const state_of_origin = getValue(row, 'state_of_origin');
-                        const lga = getValue(row, 'lga');
-                        const dob = getValue(row, 'dob');
-                        const club = getValue(row, 'club');
-                        const society = getValue(row, 'society');
 
                         // 1. Insert Student Bio Data
-                        studentStmt.run(
-                            admission_no, surname, password, m_name, l_name, url,
-                            gender, phone, email, address, state_of_origin, lga, dob, club, society,
-                            function(err) {
-                                if (!err && this.changes > 0) newStudentCount++;
-                            }
-                        );
+                        await new Promise((resolve, reject) => {
+                            db.run(`INSERT OR REPLACE INTO students (
+                                admission_no, surname, password, m_name, l_name, url, 
+                                gender, phone, email, address, state_of_origin, lga, dob, club, society
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, 
+                            [
+                                admission_no, surname, password, getValue(row, 'm_name'), getValue(row, 'l_name'), 
+                                getValue(row, 'url'), getValue(row, 'gender'), getValue(row, 'phone'), 
+                                getValue(row, 'email'), getValue(row, 'address'), getValue(row, 'state_of_origin'), 
+                                getValue(row, 'lga'), getValue(row, 'dob'), getValue(row, 'club'), 
+                                getValue(row, 'society')
+                            ], function(err) {
+                                if (err) reject(err);
+                                else {
+                                    if (this.changes > 0) newStudentCount++;
+                                    resolve();
+                                }
+                            });
+                        });
 
-                        // 2. Extract Subjects (1 or X)
+                        // 2. Extract Subjects
                         const offered = subjectHeaders.filter(h => {
                             const val = (row[h] || '').toString().trim().toUpperCase();
                             return val === '1' || val === 'X';
                         });
 
                         if (offered.length > 0) {
-                            subjectStmt.run(
-                                admission_no, sessionFolder, className, offered.join(','),
+                            await new Promise((resolve, reject) => {
+                                db.run(`INSERT OR REPLACE INTO subjects_offered (
+                                    admission_no, academic_session, class_name, subjects
+                                ) VALUES (?, ?, ?, ?)`,
+                                [admission_no, sessionFolder, className, offered.join(',')],
                                 function(err) {
-                                    if (!err && this.changes > 0) subjectUpdateCount++;
-                                }
-                            );
+                                    if (err) reject(err);
+                                    else {
+                                        if (this.changes > 0) subjectUpdateCount++;
+                                        resolve();
+                                    }
+                                });
+                            });
                         }
-                    });
+                    }
 
-                    studentStmt.finalize();
-                    subjectStmt.finalize();
-                    console.log(`   ✅ ${className}: Processed (${newStudentCount} new students, ${subjectUpdateCount} subject records)`);
+                    console.log(`   ✅ ${className}: Processed (${newStudentCount} students, ${subjectUpdateCount} subjects)`);
 
                 } catch (e) {
-                    console.error(`   ❌ Error reading ${className}.xlsx:`, e.message);
+                    console.error(`   ❌ Error reading ${className}.xlsx:`, e.stack);
                 }
-            });
-        });
-        console.log("\n✨ Import Finished.");
-    });
+            }
+        }
+        console.log("\n✨ Import Finished Successfully.");
+    } catch (err) {
+        console.error("❌ Fatal Import Error:", err);
+    } finally {
+        // Only close if we are running as a standalone script
+        if (require.main === module) {
+            db.close();
+        }
+    }
 };
 
-runImport();
+if (require.main === module) {
+    runImport();
+}

@@ -8,7 +8,7 @@ const db = require('./database');
 const bcrypt = require('bcrypt');
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
 // Middleware
 app.use(express.urlencoded({ extended: true })); // Built-in, safer
