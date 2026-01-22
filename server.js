@@ -136,21 +136,21 @@ function formatDOB(dob) {
     return `${dayName}, ${getOrdinal(day)} ${monthName} ${year}`;
 }
 
-// Helper: Get Average for a specific Term
-function getTermAverage(session, term, className, admissionNo, registeredSubjects) {
+// Helper: Get Scores for a specific Term (Returns { scores: [], average: x, subjectsCount: x, passesCount: x })
+function getTermResult(session, term, className, admissionNo, registeredSubjects) {
     const mappedSession = session.replace(/_and_/g, '_');
+    const result = { scores: [], average: 0, subjectsCount: 0, passesCount: 0 };
     
     // Detection Logic: Check if there's a single consolidated file for this term
     const singleFileName = `${term}_${className}_${mappedSession}.xlsx`;
     const singleFilePath = path.join(__dirname, 'aReport_card', mappedSession, term, className, singleFileName);
 
     if (fs.existsSync(singleFilePath)) {
-        // --- 1. Single File Format (e.g., 2025/2026 First Term) ---
         try {
             const workbook = xlsx.readFile(singleFilePath);
             const data = xlsx.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
-            const row = data.find(r => (r.Admission_no || '').toString().trim() === admissionNo.trim());
-            if (!row) return 0;
+            const row = data.find(r => (r.Admission_no || '').toString().trim() === admissionNo.toString().trim());
+            if (!row) return result;
 
             const subjectMap = {
                 'Basic Tech': 'Basic Technology',
@@ -162,22 +162,25 @@ function getTermAverage(session, term, className, admissionNo, registeredSubject
                 'Yoruba': 'Yoruba Language'
             };
 
-            let total = 0, count = 0;
+            let total = 0;
             registeredSubjects.forEach(sub => {
                 const excelSubName = subjectMap[sub] || sub;
                 const ca = parseFloat(row[`${excelSubName} (CA 40)`]) || 0;
                 const exam = parseFloat(row[`${excelSubName} (Exam 60)`]) || 0;
-                total += (ca + exam);
-                count++;
+                const score = ca + exam;
+                result.scores.push({ subject: sub, score });
+                total += score;
+                result.subjectsCount++;
+                if (score >= 50) result.passesCount++;
             });
-            return count > 0 ? (total / count) : 0;
-        } catch (e) { return 0; }
+            result.average = result.subjectsCount > 0 ? (total / result.subjectsCount) : 0;
+            return result;
+        } catch (e) { return result; }
     } else {
-        // --- 2. Multi-File Format (e.g., 2nd/3rd terms, or 2026/2027 First Term) ---
         const classFolderPath = path.join(__dirname, 'aReport_card', mappedSession, term, className);
-        if (!fs.existsSync(classFolderPath)) return 0;
+        if (!fs.existsSync(classFolderPath)) return result;
         
-        let total = 0, count = 0;
+        let total = 0;
         registeredSubjects.forEach(sub => {
             const fileFriendlySub = sub.trim().replace(/\s+/g, '_');
             const fileName = `${term}_${className}_${fileFriendlySub}.xlsx`;
@@ -186,18 +189,27 @@ function getTermAverage(session, term, className, admissionNo, registeredSubject
                 try {
                     const workbook = xlsx.readFile(filePath);
                     const data = xlsx.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
-                    const row = data.find(r => (r.Admission_no || '').toString().trim() === admissionNo.trim());
+                    const row = data.find(r => (r.Admission_no || '').toString().trim() === admissionNo.toString().trim());
                     if (row) {
                         const ca = parseFloat(row['CA (40 MARKS)']) || 0;
-                        const totalSub = row['TOTAL (100)'] ? parseFloat(row['TOTAL (100)']) : (ca + (parseFloat(row['MCQ (30 MARKS)']) || 0) + (parseFloat(row['THEORY (30 MARKS)']) || 0));
-                        total += totalSub;
-                        count++;
+                        const score = row['TOTAL (100)'] ? parseFloat(row['TOTAL (100)']) : (ca + (parseFloat(row['MCQ (30 MARKS)']) || 0) + (parseFloat(row['THEORY (30 MARKS)']) || 0));
+                        result.scores.push({ subject: sub, score });
+                        total += score;
+                        result.subjectsCount++;
+                        if (score >= 50) result.passesCount++;
                     }
                 } catch (e) {}
             }
         });
-        return count > 0 ? (total / count) : 0;
+        result.average = result.subjectsCount > 0 ? (total / result.subjectsCount) : 0;
+        return result;
     }
+}
+
+// Updated getTermAverage to use the new helper
+function getTermAverage(session, term, className, admissionNo, registeredSubjects) {
+    const res = getTermResult(session, term, className, admissionNo, registeredSubjects);
+    return res.average;
 }
 
 // Helper: Generate Dynamic Principal Remark
@@ -411,6 +423,54 @@ app.get('/profile', (req, res) => {
 
 app.get('/portal', (req, res) => {
     res.redirect('/dashboard');
+});
+
+app.get('/audit', (req, res) => {
+    if (!req.session.student) return res.redirect('/');
+    const dbStudent = req.session.student;
+
+    db.all(`SELECT * FROM subjects_offered WHERE admission_no = ? ORDER BY academic_session ASC`, 
+    [dbStudent.admission_no], (err, records) => {
+        if (err) {
+            console.error(err);
+            return res.send("Error loading audit data.");
+        }
+
+        const auditData = [];
+        const terms = ['First_term', 'Second_term', 'Third_term'];
+
+        records.forEach(record => {
+            const sessionData = {
+                session: record.academic_session,
+                class: record.class_name,
+                totalSubjects: 0,
+                totalPassed: 0,
+                average: 0
+            };
+
+            const registeredSubjects = (record.subjects || '').split(',').filter(s => s.trim() !== '');
+            let sessionTotalAvg = 0;
+            let termsComputed = 0;
+
+            terms.forEach(term => {
+                const termRes = getTermResult(record.academic_session, term, record.class_name, dbStudent.admission_no, registeredSubjects);
+                if (termRes.subjectsCount > 0) {
+                    sessionData.totalSubjects += termRes.subjectsCount;
+                    sessionData.totalPassed += termRes.passesCount;
+                    sessionTotalAvg += termRes.average;
+                    termsComputed++;
+                }
+            });
+
+            sessionData.average = termsComputed > 0 ? (sessionTotalAvg / termsComputed) : 0;
+            auditData.push(sessionData);
+        });
+
+        res.render('audit', {
+            student: dbStudent,
+            auditData: auditData
+        });
+    });
 });
 
 app.get('/logout', (req, res) => {
