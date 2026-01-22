@@ -10,7 +10,18 @@ const bcrypt = require('bcrypt');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Admin Config
+const ADMIN_HASH = bcrypt.hashSync('mhookymiles2003', 10);
+
 // Middleware
+const adminAuth = (req, res, next) => {
+    if (req.session.isAdmin) {
+        next();
+    } else {
+        res.redirect('/admin/login');
+    }
+};
+
 app.use(express.urlencoded({ extended: true })); // Built-in, safer
 app.use(express.json()); // Handle JSON too just in case
 app.use(express.static('public')); 
@@ -210,6 +221,129 @@ function getTermResult(session, term, className, admissionNo, registeredSubjects
 function getTermAverage(session, term, className, admissionNo, registeredSubjects) {
     const res = getTermResult(session, term, className, admissionNo, registeredSubjects);
     return res.average;
+}
+
+// Helper: Get School-wide Statistics for Admin
+function getAdminStats(session, term, filterClass) {
+    const mappedSession = session.replace(/_and_/g, '_');
+    const stats = {
+        topStudents: [], // Overall leaderboard
+        subjectStats: {}, // Pass/Fail per subject
+        classAverages: {}, // Average per class
+        totalStudents: 0
+    };
+
+    const classes = filterClass ? [filterClass] : ['JSS1', 'JSS2', 'JSS3', 'SSS1', 'SSS2', 'SSS3'];
+    const sessionDir = path.join(__dirname, 'aReport_card', mappedSession, term);
+    
+    if (!fs.existsSync(sessionDir)) return stats;
+
+    const studentMap = {}; // { admission_no: { name, scores: [], total, count, class } }
+
+    classes.forEach(className => {
+        const classPath = path.join(sessionDir, className);
+        if (!fs.existsSync(classPath)) return;
+
+        // Check for Consolidated File
+        const singleFileName = `${term}_${className}_${mappedSession}.xlsx`;
+        const singleFilePath = path.join(classPath, singleFileName);
+
+        if (fs.existsSync(singleFilePath)) {
+            try {
+                const workbook = xlsx.readFile(singleFilePath);
+                const data = xlsx.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
+                
+                data.forEach(row => {
+                    const adm = (row.Admission_no || '').toString().trim();
+                    if (!adm) return;
+                    
+                    if (!studentMap[adm]) {
+                        studentMap[adm] = { name: row.Full_Name || row.Name || adm, scores: [], total: 0, count: 0, class: className };
+                    }
+
+                    // Process all columns ending in (Exam 60) or similar to find scores
+                    Object.keys(row).forEach(key => {
+                        if (key.includes('(CA 40)') || key.includes('(Exam 60)')) {
+                            const subName = key.split('(')[0].trim();
+                            if (!stats.subjectStats[subName]) stats.subjectStats[subName] = { passed: 0, failed: 0, total: 0 };
+                            
+                            // We need the total score. Usually, the sheet has a 'Total' column for each subject?
+                            // For simplicity in this aggregator, we search for the specific subject's total or re-calculate
+                            const caValue = parseFloat(row[`${subName} (CA 40)`]) || 0;
+                            const examValue = parseFloat(row[`${subName} (Exam 60)`]) || 0;
+                            const total = caValue + examValue;
+
+                            studentMap[adm].total += total;
+                            studentMap[adm].count++;
+                            
+                            stats.subjectStats[subName].total += total;
+                            if (total >= 50) stats.subjectStats[subName].passed++;
+                            else stats.subjectStats[subName].failed++;
+                        }
+                    });
+                });
+            } catch (e) { console.error(`Admin Stats Error (${className}):`, e); }
+        } else {
+            // Process Multi-file Format
+            const files = fs.readdirSync(classPath).filter(f => f.endsWith('.xlsx'));
+            files.forEach(file => {
+                try {
+                    const subName = file.replace(`${term}_${className}_`, '').replace('.xlsx', '').replace(/_/g, ' ');
+                    const workbook = xlsx.readFile(path.join(classPath, file));
+                    const data = xlsx.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
+
+                    if (!stats.subjectStats[subName]) stats.subjectStats[subName] = { passed: 0, failed: 0, total: 0 };
+
+                    data.forEach(row => {
+                        const adm = (row.Admission_no || '').toString().trim();
+                        if (!adm) return;
+
+                        const ca = parseFloat(row['CA (40 MARKS)']) || 0;
+                        const score = row['TOTAL (100)'] ? parseFloat(row['TOTAL (100)']) : (ca + (parseFloat(row['MCQ (30 MARKS)']) || 0) + (parseFloat(row['THEORY (30 MARKS)']) || 0));
+
+                        if (!studentMap[adm]) {
+                            studentMap[adm] = { name: row.Name || row.Full_Name || adm, scores: [], total: 0, count: 0, class: className };
+                        }
+
+                        studentMap[adm].total += score;
+                        studentMap[adm].count++;
+
+                        stats.subjectStats[subName].total += score;
+                        if (score >= 50) stats.subjectStats[subName].passed++;
+                        else stats.subjectStats[subName].failed++;
+                    });
+                } catch (e) {}
+            });
+        }
+    });
+
+    // Finalize Stats
+    const studentList = Object.keys(studentMap).map(adm => {
+        const s = studentMap[adm];
+        return {
+            admission_no: adm,
+            name: s.name,
+            class: s.class,
+            average: s.count > 0 ? (s.total / s.count) : 0
+        };
+    });
+
+    // Calculate Class Averages
+    const classGroups = {};
+    studentList.forEach(s => {
+        if (!classGroups[s.class]) classGroups[s.class] = { total: 0, count: 0 };
+        classGroups[s.class].total += s.average;
+        classGroups[s.class].count++;
+    });
+
+    Object.keys(classGroups).forEach(cls => {
+        stats.classAverages[cls] = classGroups[cls].total / classGroups[cls].count;
+    });
+
+    stats.topStudents = studentList.sort((a, b) => b.average - a.average).slice(0, 50); // Top 50 in selection
+    stats.totalStudents = studentList.length;
+
+    return stats;
 }
 
 // Helper: Generate Dynamic Principal Remark
@@ -470,6 +604,35 @@ app.get('/audit', (req, res) => {
             student: dbStudent,
             auditData: auditData
         });
+    });
+});
+
+app.get('/admin/login', (req, res) => {
+    res.render('admin_login', { error: null });
+});
+
+app.post('/admin/login', (req, res) => {
+    const { password } = req.body;
+    if (bcrypt.compareSync(password || '', ADMIN_HASH)) {
+        req.session.isAdmin = true;
+        res.redirect('/admin/dashboard');
+    } else {
+        res.render('admin_login', { error: 'Incorrect Admin Password' });
+    }
+});
+
+app.get('/admin/dashboard', adminAuth, (req, res) => {
+    const session = req.query.session || '2025_and_2026';
+    const term = req.query.term || 'First_term';
+    const filterClass = req.query.class || null;
+
+    const stats = getAdminStats(session, term, filterClass);
+
+    res.render('admin_dashboard', {
+        stats,
+        session,
+        term,
+        filterClass
     });
 });
 
