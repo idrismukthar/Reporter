@@ -233,7 +233,15 @@ function getAdminStats(session, term, filterClass) {
         totalStudents: 0
     };
 
-    const classes = filterClass ? [filterClass] : ['JSS1', 'JSS2', 'JSS3', 'SSS1', 'SSS2', 'SSS3'];
+    let classes = ['JSS1', 'JSS2', 'JSS3', 'SSS1', 'SSS2', 'SSS3'];
+    
+    // Filter Logic
+    if (filterClass) {
+        if (filterClass === 'JUNIOR') classes = ['JSS1', 'JSS2', 'JSS3'];
+        else if (filterClass === 'SENIOR') classes = ['SSS1', 'SSS2', 'SSS3'];
+        else classes = [filterClass];
+    }
+
     const sessionDir = path.join(__dirname, 'aReport_card', mappedSession, term);
     
     if (!fs.existsSync(sessionDir)) return stats;
@@ -258,14 +266,16 @@ function getAdminStats(session, term, filterClass) {
                     if (!adm) return;
                     
                     if (!studentMap[adm]) {
-                        studentMap[adm] = { name: row.Full_Name || row.Name || adm, scores: [], total: 0, count: 0, class: className };
+                        // Better Name Resolution
+                        const fullName = row.Full_Name || row.Name || row.Student_Name || adm;
+                        studentMap[adm] = { name: fullName, scores: [], total: 0, count: 0, class: className };
                     }
 
                     // Process all columns ending in (Exam 60) or similar to find scores
                     Object.keys(row).forEach(key => {
                         if (key.includes('(CA 40)') || key.includes('(Exam 60)')) {
                             const subName = key.split('(')[0].trim();
-                            if (!stats.subjectStats[subName]) stats.subjectStats[subName] = { passed: 0, failed: 0, total: 0 };
+                            if (!stats.subjectStats[subName]) stats.subjectStats[subName] = { passed: 0, failed: 0, total: 0, studentCount: 0 };
                             
                             // We need the total score. Usually, the sheet has a 'Total' column for each subject?
                             // For simplicity in this aggregator, we search for the specific subject's total or re-calculate
@@ -277,6 +287,8 @@ function getAdminStats(session, term, filterClass) {
                             studentMap[adm].count++;
                             
                             stats.subjectStats[subName].total += total;
+                            stats.subjectStats[subName].studentCount++;
+                            
                             if (total >= 50) stats.subjectStats[subName].passed++;
                             else stats.subjectStats[subName].failed++;
                         }
@@ -292,7 +304,7 @@ function getAdminStats(session, term, filterClass) {
                     const workbook = xlsx.readFile(path.join(classPath, file));
                     const data = xlsx.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
 
-                    if (!stats.subjectStats[subName]) stats.subjectStats[subName] = { passed: 0, failed: 0, total: 0 };
+                    if (!stats.subjectStats[subName]) stats.subjectStats[subName] = { passed: 0, failed: 0, total: 0, studentCount: 0 };
 
                     data.forEach(row => {
                         const adm = (row.Admission_no || '').toString().trim();
@@ -302,18 +314,29 @@ function getAdminStats(session, term, filterClass) {
                         const score = row['TOTAL (100)'] ? parseFloat(row['TOTAL (100)']) : (ca + (parseFloat(row['MCQ (30 MARKS)']) || 0) + (parseFloat(row['THEORY (30 MARKS)']) || 0));
 
                         if (!studentMap[adm]) {
-                            studentMap[adm] = { name: row.Name || row.Full_Name || adm, scores: [], total: 0, count: 0, class: className };
+                            const fullName = row.Name || row.Full_Name || row.Student_Name || adm;
+                            studentMap[adm] = { name: fullName, scores: [], total: 0, count: 0, class: className };
                         }
 
                         studentMap[adm].total += score;
                         studentMap[adm].count++;
 
                         stats.subjectStats[subName].total += score;
+                        stats.subjectStats[subName].studentCount++;
+
                         if (score >= 50) stats.subjectStats[subName].passed++;
                         else stats.subjectStats[subName].failed++;
                     });
                 } catch (e) {}
             });
+        }
+    });
+
+    // Finalize Stats with Low-Count Subject Filter
+    Object.keys(stats.subjectStats).forEach(sub => {
+        if (stats.subjectStats[sub].studentCount < 5) {
+             // If fewer than 5 students took this subject, remove it from stats to avoid skewing "Worst Subject" charts
+             delete stats.subjectStats[sub]; 
         }
     });
 
