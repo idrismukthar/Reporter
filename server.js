@@ -804,6 +804,48 @@ app.get('/view-result/:session/:term', (req, res) => {
                 }
             }
 
+            // --- Read Extra Curricular Data ---
+            const extraFilePath = path.join(__dirname, 'Extra_curricular', mappedSession, term, className, `extra_${className.toLowerCase()}_${term.toLowerCase()}_${mappedSession}.xlsx`);
+            let extraData = {
+                teacher_comment: '',
+                club: studentDetail.club || 'N/A',
+                society: studentDetail.society || 'N/A',
+                punctuality: '',
+                neatness: '',
+                obedience: '',
+                honesty: '',
+                discipline: '',
+                days_opened: '',
+                days_present: '',
+                days_absent: '',
+                reason: ''
+            };
+
+            if (fs.existsSync(extraFilePath)) {
+                try {
+                    const extraWorkbook = xlsx.readFile(extraFilePath);
+                    const extraSheetData = xlsx.utils.sheet_to_json(extraWorkbook.Sheets[extraWorkbook.SheetNames[0]]);
+                    const extraRow = extraSheetData.find(r => (r.Admission_no || '').toString().trim() === admission_no.toString().trim());
+                    if (extraRow) {
+                        extraData.teacher_comment = extraRow.teacher_comment || '';
+                        extraData.club = extraRow.club || extraData.club;
+                        extraData.society = extraRow.society || extraData.society;
+                        // Checking for undefined so '0' doesn't get overwritten
+                        extraData.punctuality = extraRow.Punctuality !== undefined ? extraRow.Punctuality : '';
+                        extraData.neatness = extraRow.Neatness !== undefined ? extraRow.Neatness : '';
+                        extraData.obedience = extraRow.Obedience !== undefined ? extraRow.Obedience : '';
+                        extraData.honesty = extraRow.Honesty !== undefined ? extraRow.Honesty : '';
+                        extraData.discipline = extraRow.Discipline !== undefined ? extraRow.Discipline : '';
+                        extraData.days_opened = extraRow.days_opened !== undefined ? extraRow.days_opened : '';
+                        extraData.days_present = extraRow.days_present !== undefined ? extraRow.days_present : '';
+                        extraData.days_absent = extraRow.days_absent !== undefined ? extraRow.days_absent : '';
+                        extraData.reason = extraRow.reason !== undefined ? extraRow.reason : '';
+                    }
+                } catch (e) {
+                    console.error(`Error reading extra curricular file:`, e);
+                }
+            }
+
             res.render('dashboard', {
                 student: {
                     ...studentDetail,
@@ -812,9 +854,10 @@ app.get('/view-result/:session/:term', (req, res) => {
                     Class: className,
                     Sex: studentDetail.Sex || 'N/A',
                     Passport: studentDetail.url || 'default.jfif',
-                    club: studentDetail.club,
-                    society: studentDetail.society
+                    club: extraData.club,
+                    society: extraData.society
                 },
+                extra: extraData,
                 term: term.replace(/_/g, ' '),
                 session: session.replace(/_and_/g, '/'),
                 scores: scores,

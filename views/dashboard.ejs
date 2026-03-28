@@ -26,6 +26,7 @@
         .comment-area { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
         .comment-box { border: 1px solid #888; padding: 6px; height: 115px; position: relative; }
         .principal-font { font-family: 'Dancing Script', cursive; font-size: 14px; color: #1a1a1a; margin: 5px 0; line-height: 1.3;}
+        .teacher-font { font-family: 'Times New Roman', Times, serif; font-size: 13px; color: #1a1a1a; margin: 5px 0; line-height: 1.3;}
         .sig { position: absolute; bottom: 3px; right: 8px; border-top: 1px solid #000; width: 110px; text-align: center; font-size: 8px; }
         .footer-date { margin-top: 10px; font-size: 8px; color: #666; font-style: italic; border-top: 1px dotted #ccc; padding-top: 3px; }
     </style>
@@ -78,6 +79,7 @@
                             <th>CA (40)</th>
                             <th>EXAM (60)</th>
                             <th>TOTAL</th>
+                            <th>GRADE</th>
                             <th>REMARK</th>
                         </tr>
                     </thead>
@@ -98,8 +100,9 @@
                                 <td><%= s.ca_score %></td>
                                 <td><%= s.exam_score %></td>
                                 <td style="color: <%= gradeInfo.c %>; font-weight: bold;"><%= s.total_score %></td>
+                                <td style="color: <%= gradeInfo.c %>; font-weight: bold;"><%= gradeInfo.g %></td>
                                 <td style="color: <%= gradeInfo.c %>; font-weight: bold; font-size: 8px;">
-                                    <%= gradeInfo.g %> - <%= gradeInfo.r %>
+                                    <%= gradeInfo.r %>
                                 </td>
                             </tr>
                         <% }) %>
@@ -144,15 +147,25 @@
                     </table>
                 </div>
 
-                <div class="summary-box">
-                    <h4 style="margin: 0 0 4px 0; font-size: 9px; border-bottom: 1px solid #6a0dad;">5. CHARACTER & CONDUCT</h4>
+                <div class="summary-box" style="margin-top: 5px;">
+                    <h4 style="margin: 0 0 4px 0; font-size: 10px; border-bottom: 1px solid #6a0dad;">5. ATTENDANCE</h4>
+                    <table style="font-size: 8px;">
+                        <tr><td>Days Opened</td><td style="width: 30px; text-align: center;"><%= typeof extra !== 'undefined' && extra.days_opened !== '' ? extra.days_opened : ' ' %></td></tr>
+                        <tr><td>Days Present</td><td style="text-align: center;"><%= typeof extra !== 'undefined' && extra.days_present !== '' ? extra.days_present : ' ' %></td></tr>
+                        <tr><td>Days Absent</td><td style="text-align: center;"><%= typeof extra !== 'undefined' && extra.days_absent !== '' ? extra.days_absent : ' ' %></td></tr>
+                        <tr><td>Reason</td><td style="text-align: center;"><%= typeof extra !== 'undefined' && extra.reason !== '' ? extra.reason : ' ' %></td></tr>
+                    </table>
+                </div>
+
+                <div class="summary-box" style="margin-top: 5px;">
+                    <h4 style="margin: 0 0 4px 0; font-size: 9px; border-bottom: 1px solid #6a0dad;">6. CHARACTER & CONDUCT</h4>
                     <p style="font-size: 8px; text-align: center; margin-bottom: 2px;">(Scale: 5=Excellent, 1=Fair)</p>
                     <table style="font-size: 8px;">
-                        <tr><td>Punctuality</td><td style="width: 30px; text-align: center;"> </td></tr>
-                        <tr><td>Neatness</td><td style="text-align: center;"> </td></tr>
-                        <tr><td>Obedience</td><td style="text-align: center;"> </td></tr>
-                        <tr><td>Honesty</td><td style="text-align: center;"> </td></tr>
-                        <tr><td>Discipline</td><td style="text-align: center;"> </td></tr>
+                        <tr><td>Punctuality</td><td style="width: 30px; text-align: center;"><%= typeof extra !== 'undefined' && extra.punctuality !== '' ? extra.punctuality : ' ' %></td></tr>
+                        <tr><td>Neatness</td><td style="text-align: center;"><%= typeof extra !== 'undefined' && extra.neatness !== '' ? extra.neatness : ' ' %></td></tr>
+                        <tr><td>Obedience</td><td style="text-align: center;"><%= typeof extra !== 'undefined' && extra.obedience !== '' ? extra.obedience : ' ' %></td></tr>
+                        <tr><td>Honesty</td><td style="text-align: center;"><%= typeof extra !== 'undefined' && extra.honesty !== '' ? extra.honesty : ' ' %></td></tr>
+                        <tr><td>Discipline</td><td style="text-align: center;"><%= typeof extra !== 'undefined' && extra.discipline !== '' ? extra.discipline : ' ' %></td></tr>
                     </table>
                 </div>
             </div>
@@ -161,7 +174,7 @@
         <div class="comment-area">
             <div class="comment-box">
                 <strong>CLASS TEACHER'S REMARK:</strong>
-                <p class="principal-font"></p>
+                <p class="teacher-font"><%= typeof extra !== 'undefined' ? extra.teacher_comment : '' %></p>
                 <div class="sig">Teacher's Signature</div>
             </div>
             <div class="comment-box">
@@ -172,7 +185,20 @@
         </div>
 
         <div class="footer-date">
-            Date Printed: <%= new Date().toLocaleString('en-GB') %>
+            <% 
+                const d = new Date();
+                const dayStr = d.getDate();
+                const ord = (n) => {
+                    const s = ["th", "st", "nd", "rd"];
+                    const v = n % 100;
+                    return n + (s[(v - 20) % 10] || s[v] || s[0]);
+                };
+                const weekdayStr = d.toLocaleString('en-GB', { weekday: 'long' });
+                const monthStr = d.toLocaleString('en-GB', { month: 'long' }).toLowerCase();
+                const yearStr = d.getFullYear();
+                const timeStr = d.toLocaleTimeString('en-GB'); 
+            %>
+            Date Printed: <%= weekdayStr %>, <%= ord(dayStr) %> <%= monthStr %> <%= yearStr %> on the school's website tlmps.netlify.app as at <%= timeStr %>
         </div>
     </div>
 
