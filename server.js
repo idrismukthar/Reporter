@@ -630,6 +630,10 @@ app.get('/audit', (req, res) => {
     });
 });
 
+app.get('/admin', (req, res) => {
+    res.redirect('/admin/login');
+});
+
 app.get('/admin/login', (req, res) => {
     res.render('admin_login', { error: null });
 });
