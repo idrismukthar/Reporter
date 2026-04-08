@@ -42,7 +42,7 @@
                 <h2>THE LEADERS MEMORIAL PRIVATE SCHOOL</h2>
                 <p>Motto: We Nurture the Leaders of tomorrow</p>
                 <p>Address: 17, Shoye Odubana Street, Off Papa Major B/stop, Ijegun-Ikotun, Lagos.</p>
-                <p>Contact: contacttlmps@gmail.com | 08034417992 </p>
+                <p>Contact: contacttlmps@gmail.com | 08034417992 <br> <p>website: <tlmps class="netlify app">tlmps.netlify.app</tlmps></p></p>
             </div>
             <img src="/img/<%= student.Passport %>" class="student-photo" onerror="this.src='https://via.placeholder.com/80x90'">
         </div>
@@ -54,7 +54,7 @@
         <div class="info-bar">
             <div>
                 <strong>FULL NAME:</strong> <%= student.Name %><br>
-                <strong>ADMISSION NO:</strong> <%= student.Admission_no %>
+                <strong>ADMISSION NUMBER:</strong> <%= student.Admission_no %>
             </div>
             <div>
                 <strong>CLASS:</strong> <%= student.Class %><br>
@@ -78,7 +78,7 @@
                             <th style="width: 45%;">SUBJECTS OFFERED</th>
                             <th>CA (40)</th>
                             <th>EXAM (60)</th>
-                            <th>TOTAL</th>
+                            <th>TOTAL (100)</th>
                             <th>GRADE</th>
                             <th>REMARK</th>
                         </tr>
@@ -108,19 +108,41 @@
                         <% }) %>
                     </tbody>
                 </table>
+
+                <div class="summary-box" style="margin-top: 15px; border: 1px solid #6a0dad; background: #fdf2ff; padding: 10px;">
+                    <h4 style="margin: 0 0 8px 0; font-size: 12px; border-bottom: 1px solid #6a0dad; font-weight: 900;">7. RESULT ANALYSIS FOR YOUR <%= term.toUpperCase() %> EXAMINATION </h4>
+                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 0 5px;">
+                        <div style="font-size: 13px; font-weight: 900; color: #6a0dad;">
+                            TOTAL MARKS OBTAINED: <span style="font-size: 18px; color: #000;"><%= grandTotal %></span>
+                        </div>
+                        <div style="text-align: right; font-size: 13px; font-weight: 900; color: #444;">
+                            AVERAGE: <span style="color: #6a0dad;"><%= grandTotal %> / <%= totalSubjects * 100 %></span>
+                            <span style="margin-left: 10px; font-size: 18px; color: #6a0dad; background: #fff; padding: 2px 8px; border: 1px solid #6a0dad; border-radius: 4px;">
+                                <%= currentAvg %>%
+                            </span>
+                        </div>
+                    </div>
+                    <div style="margin-top: 10px; padding-top: 8px; border-top: 1px dashed #6a0dad; font-size: 9px; color: #444; display: flex; justify-content: space-between; font-weight: bold;">
+                        <span>A: 70-100 (EXCELLENT)</span>
+                        <span>B: 60-69 (Very GOOD)</span>
+                        <span>C: 50-59 (GOOD)</span>
+                        <span>D: 45-49 (PASS)</span>
+                        <span>F: 0-44 (FAIL)</span>
+                    </div>
+                </div>
             </div>
 
             <div class="side-stats-container">
                 <div class="summary-box">
                     <h4 style="margin: 0 0 4px 0; font-size: 10px; border-bottom: 1px solid #6a0dad;">3. SCORES SUMMARY</h4>
-                    <p>Term 1 Average: <strong><%= t1Avg %>%</strong></p>
+                    <p>First term's Average: <strong><%= t1Avg %>%</strong></p>
                     <% if (term.toLowerCase() === 'second term') { %>
-                        <p>Term 2 Average: <strong><%= currentAvg %>%</strong></p>
+                        <p>Second term's Average: <strong><%= currentAvg %>%</strong></p>
                         <p style="color: #6a0dad; font-size: 12px;">Cumulative: <strong><%= cumulativeAvg %>%</strong></p>
                     <% } %>
                     <% if (term.toLowerCase() === 'third term') { %>
-                        <p>Term 2 Average: <strong><%= t2Avg %>%</strong></p>
-                        <p>Term 3 Average: <strong><%= currentAvg %>%</strong></p>
+                        <p>Second term's Average: <strong><%= t2Avg %>%</strong></p>
+                        <p>Third term's Average: <strong><%= currentAvg %>%</strong></p>
                         <p style="color: #6a0dad; font-size: 12px;">Cumulative: <strong><%= cumulativeAvg %>%</strong></p>
                     <% } %>
                     <p>Total Subjects Offered: <strong><%= totalSubjects %></strong></p>
@@ -134,7 +156,29 @@
                 </div>
 
                 <div class="summary-box" style="margin-top: 5px;">
-                    <h4 style="margin: 0 0 4px 0; font-size: 10px; border-bottom: 1px solid #6a0dad;">4. EXTRACURRICULAR PARTICIPATION</h4>
+                    <h4 style="margin: 0 0 4px 0; font-size: 10px; border-bottom: 1px solid #6a0dad;">4. ATTENDANCE</h4>
+                    <table style="font-size: 8px;">
+                        <tr><td>Days School Opened</td><td style="width: 30px; text-align: center;"><%= typeof extra !== 'undefined' && extra.days_opened !== '' ? extra.days_opened : ' ' %></td></tr>
+                        <tr><td>Days Present</td><td style="text-align: center;"><%= typeof extra !== 'undefined' && extra.days_present !== '' ? extra.days_present : ' ' %></td></tr>
+                        <tr><td>Days Absent</td><td style="text-align: center;"><%= typeof extra !== 'undefined' && extra.days_absent !== '' ? extra.days_absent : ' ' %></td></tr>
+                        <tr><td>Reason</td><td style="text-align: center;"><%= typeof extra !== 'undefined' && extra.reason !== '' ? extra.reason : ' ' %></td></tr>
+                    </table>
+                </div>
+
+                <div class="summary-box" style="margin-top: 5px;">
+                    <h4 style="margin: 0 0 4px 0; font-size: 9px; border-bottom: 1px solid #6a0dad;">5. CHARACTER & CONDUCT</h4>
+                    <p style="font-size: 8px; text-align: center; margin-bottom: 2px;">(Scale: 5=Excellent, 1=Fair)</p>
+                    <table style="font-size: 8px;">
+                        <tr><td>Punctuality</td><td style="width: 30px; text-align: center;"><%= typeof extra !== 'undefined' && extra.punctuality !== '' ? extra.punctuality : ' ' %></td></tr>
+                        <tr><td>Neatness</td><td style="text-align: center;"><%= typeof extra !== 'undefined' && extra.neatness !== '' ? extra.neatness : ' ' %></td></tr>
+                        <tr><td>Obedience</td><td style="text-align: center;"><%= typeof extra !== 'undefined' && extra.obedience !== '' ? extra.obedience : ' ' %></td></tr>
+                        <tr><td>Honesty</td><td style="text-align: center;"><%= typeof extra !== 'undefined' && extra.honesty !== '' ? extra.honesty : ' ' %></td></tr>
+                        <tr><td>Discipline</td><td style="text-align: center;"><%= typeof extra !== 'undefined' && extra.discipline !== '' ? extra.discipline : ' ' %></td></tr>
+                    </table>
+                </div>
+
+                <div class="summary-box" style="margin-top: 5px;">
+                    <h4 style="margin: 0 0 4px 0; font-size: 10px; border-bottom: 1px solid #6a0dad;">6. EXTRACURRICULAR PARTICIPATION</h4>
                     <table style="font-size: 9px;">
                         <tr>
                             <td style="font-weight: bold;">Club</td>
@@ -144,28 +188,6 @@
                             <td style="font-weight: bold;">Society</td>
                             <td><%= student.society || 'N/A' %></td>
                         </tr>
-                    </table>
-                </div>
-
-                <div class="summary-box" style="margin-top: 5px;">
-                    <h4 style="margin: 0 0 4px 0; font-size: 10px; border-bottom: 1px solid #6a0dad;">5. ATTENDANCE</h4>
-                    <table style="font-size: 8px;">
-                        <tr><td>Days Opened</td><td style="width: 30px; text-align: center;"><%= typeof extra !== 'undefined' && extra.days_opened !== '' ? extra.days_opened : ' ' %></td></tr>
-                        <tr><td>Days Present</td><td style="text-align: center;"><%= typeof extra !== 'undefined' && extra.days_present !== '' ? extra.days_present : ' ' %></td></tr>
-                        <tr><td>Days Absent</td><td style="text-align: center;"><%= typeof extra !== 'undefined' && extra.days_absent !== '' ? extra.days_absent : ' ' %></td></tr>
-                        <tr><td>Reason</td><td style="text-align: center;"><%= typeof extra !== 'undefined' && extra.reason !== '' ? extra.reason : ' ' %></td></tr>
-                    </table>
-                </div>
-
-                <div class="summary-box" style="margin-top: 5px;">
-                    <h4 style="margin: 0 0 4px 0; font-size: 9px; border-bottom: 1px solid #6a0dad;">6. CHARACTER & CONDUCT</h4>
-                    <p style="font-size: 8px; text-align: center; margin-bottom: 2px;">(Scale: 5=Excellent, 1=Fair)</p>
-                    <table style="font-size: 8px;">
-                        <tr><td>Punctuality</td><td style="width: 30px; text-align: center;"><%= typeof extra !== 'undefined' && extra.punctuality !== '' ? extra.punctuality : ' ' %></td></tr>
-                        <tr><td>Neatness</td><td style="text-align: center;"><%= typeof extra !== 'undefined' && extra.neatness !== '' ? extra.neatness : ' ' %></td></tr>
-                        <tr><td>Obedience</td><td style="text-align: center;"><%= typeof extra !== 'undefined' && extra.obedience !== '' ? extra.obedience : ' ' %></td></tr>
-                        <tr><td>Honesty</td><td style="text-align: center;"><%= typeof extra !== 'undefined' && extra.honesty !== '' ? extra.honesty : ' ' %></td></tr>
-                        <tr><td>Discipline</td><td style="text-align: center;"><%= typeof extra !== 'undefined' && extra.discipline !== '' ? extra.discipline : ' ' %></td></tr>
                     </table>
                 </div>
             </div>
@@ -179,8 +201,8 @@
             </div>
             <div class="comment-box">
                 <strong>PRINCIPAL'S REMARK:</strong>
-                <p class="principal-font"><%= finalPrincipalRemark %></p>
-                <div class="sig">Principal's Signature</div>
+                <p class="principal-font"><%- finalPrincipalRemark %></p>
+                <div class="sig"><strong>MRS. Idris.L.T</strong><br>Principal's Signature</div>
             </div>
         </div>
 
@@ -199,6 +221,9 @@
                 const timeStr = d.toLocaleTimeString('en-GB'); 
             %>
             Date Printed: <%= weekdayStr %>, <%= ord(dayStr) %> <%= monthStr %> <%= yearStr %> on the school's website tlmps.netlify.app as at <%= timeStr %>
+            <div style="margin-top: 10px; font-weight: 900; color: #6a0dad; font-size: 14px; text-align: center; text-transform: uppercase;">
+                Next term begins: <%= typeof extra !== 'undefined' && extra.next_term ? extra.next_term : '____________________' %>
+            </div>
         </div>
     </div>
 

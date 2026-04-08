@@ -92,7 +92,7 @@ function calculateMultiFilePosition(folderPath, termPrefix, className, currentAd
                 const ca = parseFloat(row['CA (40 MARKS)']) || 0;
                 const mcq = parseFloat(row['MCQ (30 MARKS)']) || 0;
                 const theory = parseFloat(row['THEORY (30 MARKS)']) || 0;
-                const total = row['TOTAL (100)'] ? parseFloat(row['TOTAL (100)']) : (ca + mcq + theory);
+                const total = ca + mcq + theory;
 
                 if (!studentMap[adm]) studentMap[adm] = { total: 0, count: 0 };
                 studentMap[adm].total += total;
@@ -203,7 +203,7 @@ function getTermResult(session, term, className, admissionNo, registeredSubjects
                     const row = data.find(r => (r.Admission_no || '').toString().trim() === admissionNo.toString().trim());
                     if (row) {
                         const ca = parseFloat(row['CA (40 MARKS)']) || 0;
-                        const score = row['TOTAL (100)'] ? parseFloat(row['TOTAL (100)']) : (ca + (parseFloat(row['MCQ (30 MARKS)']) || 0) + (parseFloat(row['THEORY (30 MARKS)']) || 0));
+                        const score = ca + (parseFloat(row['MCQ (30 MARKS)']) || 0) + (parseFloat(row['THEORY (30 MARKS)']) || 0);
                         result.scores.push({ subject: sub, score });
                         total += score;
                         result.subjectsCount++;
@@ -311,7 +311,7 @@ function getAdminStats(session, term, filterClass) {
                         if (!adm) return;
 
                         const ca = parseFloat(row['CA (40 MARKS)']) || 0;
-                        const score = row['TOTAL (100)'] ? parseFloat(row['TOTAL (100)']) : (ca + (parseFloat(row['MCQ (30 MARKS)']) || 0) + (parseFloat(row['THEORY (30 MARKS)']) || 0));
+                        const score = ca + (parseFloat(row['MCQ (30 MARKS)']) || 0) + (parseFloat(row['THEORY (30 MARKS)']) || 0);
 
                         if (!studentMap[adm]) {
                             const fullName = row.Name || row.Full_Name || row.Student_Name || adm;
@@ -370,52 +370,54 @@ function getAdminStats(session, term, filterClass) {
 }
 
 // Helper: Generate Dynamic Principal Remark
-function generatePrincipalRemark(avg, scores, position) {
+function generatePrincipalRemark(avg, scores, position, firstName) {
     const pAvg = parseFloat(avg);
+    const cleanName = firstName ? firstName.split(' ')[0].charAt(0).toUpperCase() + firstName.split(' ')[0].slice(1).toLowerCase() : "";
+    const namePrefix = cleanName ? `${cleanName}, ` : "";
     let remark = "";
     
     const catA = [
-        "Exceptional work! Your dedication to your studies is truly inspiring.",
-        "A brilliant performance. You have shown remarkable consistency and intelligence.",
-        "Outstanding results! Keep maintaining this high standard of excellence.",
-        "You are a star student. Your academic prowess is simply commendable.",
-        "Magnificent performance. Your hard work has yielded great fruit.",
-        "An exemplary academic record. You have set a high bar for others.",
-        "Truly impressive! Your focus and commitment are evident in these grades.",
-        "Wonderful results. Your performance is a testament to your hard work.",
-        "Exceptional! You have a bright future ahead with this level of performance.",
-        "A masterclass in academic excellence. Keep up the fantastic work.",
-        "You have exceeded all expectations. Your results are simply fantastic.",
-        "A top-tier performance. Your intellectual curiosity is highly praiseworthy.",
-        "Phenomenal work! You are a pride to the school and your parents.",
-        "Your results are a clear reflection of your unwavering focus. Well done!",
-        "Absolute excellence! May you continue to soar high in your academics."
+        `${namePrefix}this is an exceptional work! Your dedication to your studies is truly inspiring.`,
+        `${namePrefix}a brilliant performance. You have shown remarkable consistency and intelligence.`,
+        `${namePrefix}outstanding results! Keep maintaining this high standard of excellence.`,
+        `${namePrefix}you are a star student. Your academic prowess is simply commendable.`,
+        `${namePrefix}magnificent performance. Your hard work has yielded great fruit.`,
+        `${namePrefix}an exemplary academic record. You have set a high bar for others.`,
+        `${namePrefix}truly impressive! Your focus and commitment are evident in these grades.`,
+        `${namePrefix}wonderful results. Your performance is a testament to your hard work.`,
+        `${namePrefix}exceptional! You have a bright future ahead with this level of performance.`,
+        `${namePrefix}a masterclass in academic excellence. Keep up the fantastic work.`,
+        `${namePrefix}you have exceeded all expectations. Your results are simply fantastic.`,
+        `${namePrefix}a top-tier performance. Your intellectual curiosity is highly praiseworthy.`,
+        `${namePrefix}phenomenal work! You are a pride to the school and your parents.`,
+        `${namePrefix}your results are a clear reflection of your unwavering focus. Well done!`,
+        `${namePrefix}absolute excellence! May you continue to soar high in your academics.`
     ];
     
     const catB = [
-        "Very well done! You have performed admirably well this term.",
-        "A strong performance. With a bit more effort, you can break into the top bracket.",
-        "Good job! Don't relent; aim even higher in the coming term.",
-        "Impressive results. Keep pushing your limits to achieve even greater success.",
-        "Well done! You have shown great potential. Stay focused and keep working hard.",
-        "A commendable performance. Consistency and more effort will yield even better results.",
-        "Very good! You have a solid grasp of your subjects. Aim for excellence next time.",
-        "Nice work! You are doing very well. Put in more effort to reach the peak.",
-        "Good performance. Don't be complacent; keep stiving for the best.",
-        "Well done! Your progress is steady. More determination will take you further."
+        `${namePrefix}very well done! You have performed admirably well this term.`,
+        `${namePrefix}a strong performance. With a bit more effort, you can break into the top bracket.`,
+        `${namePrefix}good job! Don't relent; aim even higher in the coming term.`,
+        `${namePrefix}impressive results. Keep pushing your limits to achieve even greater success.`,
+        `${namePrefix}well done! You have shown great potential. Stay focused and keep working hard.`,
+        `${namePrefix}a commendable performance. Consistency and more effort will yield even better results.`,
+        `${namePrefix}very good! You have a solid grasp of your subjects. Aim for excellence next time.`,
+        `${namePrefix}nice work! You are doing very well. Put in more effort to reach the peak.`,
+        `${namePrefix}good performance. Don't be complacent; keep stiving for the best.`,
+        `${namePrefix}well done! Your progress is steady. More determination will take you further.`
     ];
     
     const catC = [
-        "You did well, but you need to buckle down and focus more on your studies.",
-        "A fair performance. You have the potential to do much better with more focus.",
-        "Good effort, but there is room for significant improvement. Buckle down!",
-        "You have passed, but you need to take your academics more seriously.",
-        "A decent attempt. Total focus and dedication will help you improve your grades.",
-        "You are doing okay, but you need to be more disciplined in your studies.",
-        "Not bad, but I expect a more serious approach to your work next term.",
-        "You've shown some effort, but you need to buckle down and minimize distractions.",
-        "A satisfactory performance. However, you must focus more to achieve higher.",
-        "Good progress, but you need to buckle down and give your best next time."
+        `${namePrefix}you did well, but you need to buckle down and focus more on your studies.`,
+        `${namePrefix}a fair performance. You have the potential to do much better with more focus.`,
+        `${namePrefix}good effort, but there is room for significant improvement. Buckle down!`,
+        `${namePrefix}you have passed, but you need to take your academics more seriously.`,
+        `${namePrefix}a decent attempt. Total focus and dedication will help you improve your grades.`,
+        `${namePrefix}you are doing okay, but you need to be more disciplined in your studies.`,
+        `${namePrefix}not bad, but I expect a more serious approach to your work next term.`,
+        `${namePrefix}you've shown some effort, but you need to buckle down and minimize distractions.`,
+        `${namePrefix}a satisfactory performance. However, you must focus more to achieve higher.`,
+        `${namePrefix}good progress, but you need to buckle down and give your best next time.`
     ];
 
     if (pAvg >= 80) {
@@ -425,23 +427,20 @@ function generatePrincipalRemark(avg, scores, position) {
         remark += " If you put in more effort than this term, you will score even more and you shouldn't relent.";
     } else if (pAvg >= 50) {
         remark = catC[Math.floor(Math.random() * catC.length)];
-        const weakSub = scores.find(s => s.total_score < 60);
-        if (weakSub) {
-            remark += ` You can work more on ${weakSub.subject.toUpperCase().replace(/_/g, ' ')}.`;
-        }
     } else {
-        remark = "Fair performance, put more effort.";
+        remark = `${namePrefix}this is a fair performance, put more effort.`;
     }
 
-    // Append warning for subjects below 58%
-    const veryWeakSubs = scores.filter(s => s.total_score < 58).map(s => s.subject.toUpperCase().replace(/_/g, ' '));
+    // Append warning for subjects below or equal to 50%
+    const veryWeakSubs = scores.filter(s => s.total_score <= 50).map(s => `<b>${s.subject.toUpperCase().replace(/_/g, ' ')}</b>`);
     if (veryWeakSubs.length > 0) {
         let subjectsList = "";
         if (veryWeakSubs.length === 1) {
             subjectsList = veryWeakSubs[0];
         } else {
-            const last = veryWeakSubs.pop();
-            subjectsList = veryWeakSubs.join(', ') + ' and ' + last;
+            const tempSubs = [...veryWeakSubs];
+            const last = tempSubs.pop();
+            subjectsList = tempSubs.join(', ') + ' and ' + last;
         }
         remark += ` You need to work harder on ${subjectsList}.`;
     }
@@ -453,6 +452,7 @@ function generatePrincipalRemark(avg, scores, position) {
 
     return remark;
 }
+
 
 // Routes
 app.get('/', (req, res) => { res.render('login', { error: null }); });
@@ -755,7 +755,7 @@ app.get('/view-result/:session/:term', (req, res) => {
                                 const mcq = parseFloat(row['MCQ (30 MARKS)']) || 0;
                                 const theory = parseFloat(row['THEORY (30 MARKS)']) || 0;
                                 subScores.exam_score = mcq + theory;
-                                subScores.total_score = row['TOTAL (100)'] ? parseFloat(row['TOTAL (100)']) : (subScores.ca_score + subScores.exam_score);
+                                subScores.total_score = subScores.ca_score + subScores.exam_score;
                                 
                                 // Removed Excel bio-data overrides to keep DB consistency
                             }
@@ -822,7 +822,8 @@ app.get('/view-result/:session/:term', (req, res) => {
                 days_opened: '',
                 days_present: '',
                 days_absent: '',
-                reason: ''
+                reason: '',
+                next_term: ''
             };
 
             if (fs.existsSync(extraFilePath)) {
@@ -844,6 +845,7 @@ app.get('/view-result/:session/:term', (req, res) => {
                         extraData.days_present = extraRow.days_present !== undefined ? extraRow.days_present : '';
                         extraData.days_absent = extraRow.days_absent !== undefined ? extraRow.days_absent : '';
                         extraData.reason = extraRow.reason !== undefined ? extraRow.reason : '';
+                        extraData.next_term = extraRow.next_term || extraRow.Resumption_Date || '';
                     }
                 } catch (e) {
                     console.error(`Error reading extra curricular file:`, e);
@@ -866,6 +868,7 @@ app.get('/view-result/:session/:term', (req, res) => {
                 session: session.replace(/_and_/g, '/'),
                 scores: scores,
                 totalSubjects: totalSubjects,
+                grandTotal: grandTotal,
                 currentAvg: currentAvg,
                 t1Avg: t1Avg.toFixed(2), 
                 t2Avg: t2Avg.toFixed(2),
@@ -873,7 +876,7 @@ app.get('/view-result/:session/:term', (req, res) => {
                 cumulativeAvg: cumulativeAvg,
                 position: position,
                 promoMsg: promoMsg,
-                finalPrincipalRemark: generatePrincipalRemark(currentAvg, scores, position)
+                finalPrincipalRemark: generatePrincipalRemark(currentAvg, scores, position, dbStudent.m_name || dbStudent.l_name)
             });
         } catch (excelErr) {
             console.error(excelErr);
