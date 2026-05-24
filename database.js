@@ -21,15 +21,13 @@ db.serialize(() => {
         lga TEXT,
         dob TEXT,
         club TEXT,
-        society TEXT
+        society TEXT,
+        department TEXT
     )`);
 
-    // Ensure password column exists if table already existed
-    db.run(`ALTER TABLE students ADD COLUMN password TEXT`, (err) => {
-        if (err) {
-            // Probably already exists, which is fine
-        }
-    });
+    // Ensure password and department columns exist if table already existed
+    db.run(`ALTER TABLE students ADD COLUMN password TEXT`, (err) => {});
+    db.run(`ALTER TABLE students ADD COLUMN department TEXT`, (err) => {});
 
     // Table 2: subjects_offered (Academic Sessions)
     db.run(`CREATE TABLE IF NOT EXISTS subjects_offered (

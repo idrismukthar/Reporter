@@ -81,7 +81,7 @@ const runImport = async () => {
                 try {
                     const wb = xlsx.readFile(filePath);
                     const sheet = wb.Sheets[wb.SheetNames[0]];
-                    const data = xlsx.utils.sheet_to_json(sheet);
+                    const data = xlsx.utils.sheet_to_json(sheet, { defval: "" });
 
                     let newStudentCount = 0;
                     let subjectUpdateCount = 0;
@@ -90,7 +90,7 @@ const runImport = async () => {
                     const bioAliases = [
                         'admission_no', 'admission no', 'adm_no',
                         'surname', 'm_name', 'middle_name', 'l_name', 'last_name',
-                        'url', 'passport', 'image', 'gender', 'phone', 'email', 'address',
+                        'url', 'passport', 'image', 'gender', 'department', 'phone', 'email', 'address',
                         'state_of_origin', 'lga', 'dob', 'date_of_birth', 'club', 'society'
                     ];
 
@@ -115,11 +115,11 @@ const runImport = async () => {
                         await new Promise((resolve, reject) => {
                             db.run(`INSERT OR REPLACE INTO students (
                                 admission_no, surname, password, m_name, l_name, url, 
-                                gender, phone, email, address, state_of_origin, lga, dob, club, society
-                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, 
+                                gender, department, phone, email, address, state_of_origin, lga, dob, club, society
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, 
                             [
                                 admission_no, surname, password, getValue(row, 'm_name'), getValue(row, 'l_name'), 
-                                getValue(row, 'url'), getValue(row, 'gender'), getValue(row, 'phone'), 
+                                getValue(row, 'url'), getValue(row, 'gender'), getValue(row, 'department'), getValue(row, 'phone'), 
                                 getValue(row, 'email'), getValue(row, 'address'), getValue(row, 'state_of_origin'), 
                                 getValue(row, 'lga'), getValue(row, 'dob'), getValue(row, 'club'), 
                                 getValue(row, 'society')

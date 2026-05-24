@@ -106,6 +106,12 @@
                                     <span class="detail-label">Current Class:</span>
                                     <span class="detail-value"><%= student.class %></span>
                                 </div>
+                                <% if (student.department) { %>
+                                <div class="detail-row">
+                                    <span class="detail-label">Department:</span>
+                                    <span class="detail-value"><%= student.department %></span>
+                                </div>
+                                <% } %>
                                 <div class="detail-row">
                                     <span class="detail-label">Phone Number:</span>
                                     <span class="detail-value"><%= student.phone || 'Not Record' %></span>

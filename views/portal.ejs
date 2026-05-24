@@ -65,7 +65,10 @@
                                  onerror="this.src='/img/default-avatar.png';"> <!-- Fallback -->
                             <h4 style="font-weight: bold; color: #6a0dad; margin-bottom: 5px;"><%= student.Name %></h4>
                             <span class="label label-success" style="font-size: 12px; background: #a7d129;"><%= student.Admission_no %></span>
-                            <p style="margin-top: 10px; font-weight: 600;"><%= student.Class %></p>
+                            <p style="margin-top: 10px; font-weight: 600; margin-bottom: 5px;"><%= student.Class %></p>
+                            <% if (student.department) { %>
+                                <p style="margin-top: 0px; font-weight: 600; color: #444;">DEPARTMENT: <%= student.department %></p>
+                            <% } %>
                         </div>
 
                         <ul class="list-group">

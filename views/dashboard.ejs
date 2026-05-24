@@ -59,6 +59,9 @@
             <div>
                 <strong>CLASS:</strong> <%= student.Class %><br>
                 <strong>GENDER:</strong> <%= student.Sex %>
+                <% if (student.Class && student.Class.toUpperCase().startsWith('SSS')) { %>
+                    <br><strong>DEPARTMENT:</strong> <%= student.department || 'N/A' %>
+                <% } %>
             </div>
             <div style="text-align: right;">
                 <strong>TERM:</strong> <%= term.toUpperCase() %><br>
@@ -81,6 +84,7 @@
                             <th>TOTAL (100)</th>
                             <th>GRADE</th>
                             <th>REMARK</th>
+                            <th>RANK</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -104,6 +108,7 @@
                                 <td style="color: <%= gradeInfo.c %>; font-weight: bold; font-size: 8px;">
                                     <%= gradeInfo.r %>
                                 </td>
+                                <td style="color: <%= gradeInfo.c %>; font-weight: bold;"><%= s.rank %></td>
                             </tr>
                         <% }) %>
                     </tbody>
@@ -138,12 +143,12 @@
                     <p>First term's Average: <strong><%= t1Avg %>%</strong></p>
                     <% if (term.toLowerCase() === 'second term') { %>
                         <p>Second term's Average: <strong><%= currentAvg %>%</strong></p>
-                        <p style="color: #6a0dad; font-size: 12px;">Cumulative: <strong><%= cumulativeAvg %>%</strong></p>
+                        <p style="color: #6a0dad; font-size: 12px;">Cumulative Average: <strong><%= cumulativeAvg %>%</strong></p>
                     <% } %>
                     <% if (term.toLowerCase() === 'third term') { %>
                         <p>Second term's Average: <strong><%= t2Avg %>%</strong></p>
                         <p>Third term's Average: <strong><%= currentAvg %>%</strong></p>
-                        <p style="color: #6a0dad; font-size: 12px;">Cumulative: <strong><%= cumulativeAvg %>%</strong></p>
+                        <p style="color: #6a0dad; font-size: 12px;">Cumulative Average: <strong><%= cumulativeAvg %>%</strong></p>
                     <% } %>
                     <p>Total Subjects Offered: <strong><%= totalSubjects %></strong></p>
                     <p>Class Position: <strong><%= position %></strong></p>
@@ -202,7 +207,7 @@
             <div class="comment-box">
                 <strong>PRINCIPAL'S REMARK:</strong>
                 <p class="principal-font"><%- finalPrincipalRemark %></p>
-                <div class="sig"><strong>MRS. Idris.L.T</strong><br>Principal's Signature</div>
+                <div class="sig"><strong>MRS. Idris.Lateefah.T</strong><br>Principal's Signature</div>
             </div>
         </div>
 
