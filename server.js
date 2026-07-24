@@ -1,1221 +1,1719 @@
-const express = require('express');
-const session = require('express-session');
-const bodyParser = require('body-parser');
-const path = require('path');
-const xlsx = require('xlsx');
-const fs = require('fs');
-const db = require('./database');
-const bcrypt = require('bcrypt');
+const express = require("express");
+const session = require("express-session");
+const bodyParser = require("body-parser");
+const path = require("path");
+const xlsx = require("xlsx");
+const fs = require("fs");
+const db = require("./database");
+const bcrypt = require("bcrypt");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Admin Config
-const ADMIN_HASH = bcrypt.hashSync('mhookymiles2003', 10);
+const ADMIN_HASH = bcrypt.hashSync("mhookymiles2003", 10);
 
 // Middleware
 const adminAuth = (req, res, next) => {
-    if (req.session.isAdmin) {
-        next();
-    } else {
-        res.redirect('/admin/login');
-    }
+  if (req.session.isAdmin) {
+    next();
+  } else {
+    res.redirect("/admin/login");
+  }
 };
 
 app.use(express.urlencoded({ extended: true })); // Built-in, safer
 app.use(express.json()); // Handle JSON too just in case
-app.use(express.static('public')); 
-app.set('view engine', 'ejs');
+app.use(express.static("public"));
+app.set("view engine", "ejs");
 
 // Session Config
-app.use(session({
-    secret: 'secret_key_fresh_start',
+app.use(
+  session({
+    secret: "secret_key_fresh_start",
     resave: false,
-    saveUninitialized: true
-}));
+    saveUninitialized: true,
+  }),
+);
 
 // Helper: Ordinal Number Suffix (1st, 2nd, 3rd...)
 const getOrdinal = (n) => {
-    const s = ["th", "st", "nd", "rd"];
-    const v = n % 100;
-    return n + (s[(v - 20) % 10] || s[v] || s[0]);
+  const s = ["th", "st", "nd", "rd"];
+  const v = n % 100;
+  return n + (s[(v - 20) % 10] || s[v] || s[0]);
 };
 
 // Helper: Calculate Ranking from Excel Data
 function calculateClassPosition(data, admission_no) {
-    if (!data || data.length === 0) return 'N/A';
-    const headers = Object.keys(data[0]);
-    const subjects = [];
-    headers.forEach(h => {
-        if (h.endsWith(' (CA 40)')) subjects.push(h.replace(' (CA 40)', ''));
-    });
-    if (subjects.length === 0) return 'N/A';
+  if (!data || data.length === 0) return "N/A";
+  const headers = Object.keys(data[0]);
+  const subjects = [];
+  headers.forEach((h) => {
+    if (h.endsWith(" (CA 40)")) subjects.push(h.replace(" (CA 40)", ""));
+  });
+  if (subjects.length === 0) return "N/A";
 
-    const rankings = data.map(row => {
-        let total = 0;
-        subjects.forEach(sub => {
-            total += (parseFloat(row[`${sub} (CA 40)`]) || 0) + (parseFloat(row[`${sub} (Exam 60)`]) || 0);
-        });
-        return { adm: (row.Admission_no || '').toString().trim(), avg: total / subjects.length };
+  const rankings = data.map((row) => {
+    let total = 0;
+    subjects.forEach((sub) => {
+      total +=
+        (parseFloat(row[`${sub} (CA 40)`]) || 0) +
+        (parseFloat(row[`${sub} (Exam 60)`]) || 0);
     });
+    return {
+      adm: (row.Admission_no || "").toString().trim(),
+      avg: total / subjects.length,
+    };
+  });
 
-    rankings.sort((a, b) => b.avg - a.avg);
-    let currentRank = 0, lastAvg = -1, rankMap = {};
-    rankings.forEach((s, index) => {
-        if (s.avg !== lastAvg) { currentRank = index + 1; lastAvg = s.avg; }
-        rankMap[s.adm] = currentRank;
-    });
+  rankings.sort((a, b) => b.avg - a.avg);
+  let currentRank = 0,
+    lastAvg = -1,
+    rankMap = {};
+  rankings.forEach((s, index) => {
+    if (s.avg !== lastAvg) {
+      currentRank = index + 1;
+      lastAvg = s.avg;
+    }
+    rankMap[s.adm] = currentRank;
+  });
 
-    const myRank = rankMap[admission_no.trim()];
-    return myRank ? getOrdinal(myRank) : 'N/A';
+  const myRank = rankMap[admission_no.trim()];
+  return myRank ? getOrdinal(myRank) : "N/A";
 }
 
 // Helper: Calculate Ranking from Multiple Subject Files (2nd/3rd Term)
-function calculateMultiFilePosition(folderPath, termPrefix, className, currentAdmissionNo) {
-    if (!fs.existsSync(folderPath)) return 'N/A';
-    
-    const files = fs.readdirSync(folderPath).filter(f => f.endsWith('.xlsx') && !f.startsWith('~$'));
-    if (files.length === 0) return 'N/A';
+function calculateMultiFilePosition(
+  folderPath,
+  termPrefix,
+  className,
+  currentAdmissionNo,
+) {
+  if (!fs.existsSync(folderPath)) return "N/A";
 
-    const studentMap = {}; // { adm: { total: 0, count: 0 } }
+  const files = fs
+    .readdirSync(folderPath)
+    .filter((f) => f.endsWith(".xlsx") && !f.startsWith("~$"));
+  if (files.length === 0) return "N/A";
 
-    files.forEach(file => {
-        try {
-            const workbook = xlsx.readFile(path.join(folderPath, file));
-            const data = xlsx.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
-            
-            data.forEach(row => {
-                const adm = (row.Admission_no || '').toString().trim();
-                if (!adm) return;
+  const studentMap = {}; // { adm: { total: 0, count: 0 } }
 
-                // Combine MCQ and THEORY for exam if they exist, otherwise use CA + Exam or TOTAL
-                const ca = parseFloat(row['CA (40 MARKS)']) || 0;
-                const mcq = parseFloat(row['MCQ (30 MARKS)']) || 0;
-                const theory = parseFloat(row['THEORY (30 MARKS)']) || 0;
-                const total = ca + mcq + theory;
+  files.forEach((file) => {
+    try {
+      const workbook = xlsx.readFile(path.join(folderPath, file));
+      const data = xlsx.utils.sheet_to_json(
+        workbook.Sheets[workbook.SheetNames[0]],
+      );
 
-                if (!studentMap[adm]) studentMap[adm] = { total: 0, count: 0 };
-                studentMap[adm].total += total;
-                studentMap[adm].count += 1;
-            });
-        } catch (e) {
-            console.error(`Error reading ${file}:`, e);
-        }
-    });
+      data.forEach((row) => {
+        const adm = (row.Admission_no || "").toString().trim();
+        if (!adm) return;
 
-    const rankings = Object.keys(studentMap).map(adm => ({
-        adm: adm,
-        avg: studentMap[adm].total / studentMap[adm].count
-    }));
+        // Combine MCQ and THEORY for exam if they exist, otherwise use CA + Exam or TOTAL
+        const ca = parseFloat(row["CA (40 MARKS)"]) || 0;
+        const mcq = parseFloat(row["MCQ (30 MARKS)"]) || 0;
+        const theory = parseFloat(row["THEORY (30 MARKS)"]) || 0;
+        const total = ca + mcq + theory;
 
-    rankings.sort((a, b) => b.avg - a.avg);
-    
-    let currentRank = 0, lastAvg = -1, rankMap = {};
-    rankings.forEach((s, index) => {
-        if (s.avg !== lastAvg) { currentRank = index + 1; lastAvg = s.avg; }
-        rankMap[s.adm] = currentRank;
-    });
+        if (!studentMap[adm]) studentMap[adm] = { total: 0, count: 0 };
+        studentMap[adm].total += total;
+        studentMap[adm].count += 1;
+      });
+    } catch (e) {
+      console.error(`Error reading ${file}:`, e);
+    }
+  });
 
-    const myRank = rankMap[currentAdmissionNo.trim()];
-    return myRank ? getOrdinal(myRank) : 'N/A';
+  const rankings = Object.keys(studentMap).map((adm) => ({
+    adm: adm,
+    avg: studentMap[adm].total / studentMap[adm].count,
+  }));
+
+  rankings.sort((a, b) => b.avg - a.avg);
+
+  let currentRank = 0,
+    lastAvg = -1,
+    rankMap = {};
+  rankings.forEach((s, index) => {
+    if (s.avg !== lastAvg) {
+      currentRank = index + 1;
+      lastAvg = s.avg;
+    }
+    rankMap[s.adm] = currentRank;
+  });
+
+  const myRank = rankMap[currentAdmissionNo.trim()];
+  return myRank ? getOrdinal(myRank) : "N/A";
 }
 
 // Helper: Format Date of Birth
 function formatDOB(dob) {
-    if (!dob) return 'Not Record';
-    let date;
-    
-    // Check if it's an Excel serial date (number)
-    const num = parseFloat(dob);
-    if (!isNaN(num) && num > 20000) { 
-        // 25569 is Excel's offset for 1970-01-01
-        date = new Date(Math.round((num - 25569) * 86400 * 1000));
-    } else {
-        date = new Date(dob);
-    }
+  if (!dob) return "Not Record";
+  let date;
 
-    if (isNaN(date.getTime())) return dob;
+  // Check if it's an Excel serial date (number)
+  const num = parseFloat(dob);
+  if (!isNaN(num) && num > 20000) {
+    // 25569 is Excel's offset for 1970-01-01
+    date = new Date(Math.round((num - 25569) * 86400 * 1000));
+  } else {
+    date = new Date(dob);
+  }
 
-    const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-    const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-    
-    const dayName = days[date.getDay()];
-    const day = date.getDate();
-    const monthName = months[date.getMonth()];
-    const year = date.getFullYear();
+  if (isNaN(date.getTime())) return dob;
 
-    return `${dayName}, ${getOrdinal(day)} ${monthName} ${year}`;
+  const days = [
+    "Sunday",
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+  ];
+  const months = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+  ];
+
+  const dayName = days[date.getDay()];
+  const day = date.getDate();
+  const monthName = months[date.getMonth()];
+  const year = date.getFullYear();
+
+  return `${dayName}, ${getOrdinal(day)} ${monthName} ${year}`;
 }
 
 // Helper: Get Scores for a specific Term (Returns { scores: [], average: x, subjectsCount: x, passesCount: x })
-function getTermResult(session, term, className, admissionNo, registeredSubjects) {
-    const mappedSession = session.replace(/_and_/g, '_');
-    const result = { scores: [], average: 0, subjectsCount: 0, passesCount: 0 };
-    
-    // Detection Logic: Check if there's a single consolidated file for this term
-    const singleFileName = `${term}_${className}_${mappedSession}.xlsx`;
-    const singleFilePath = path.join(__dirname, 'aReport_card', mappedSession, term, className, singleFileName);
+function getTermResult(
+  session,
+  term,
+  className,
+  admissionNo,
+  registeredSubjects,
+) {
+  const mappedSession = session.replace(/_and_/g, "_");
+  const result = { scores: [], average: 0, subjectsCount: 0, passesCount: 0 };
 
-    if (fs.existsSync(singleFilePath)) {
-        try {
-            const workbook = xlsx.readFile(singleFilePath);
-            const data = xlsx.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
-            const row = data.find(r => (r.Admission_no || '').toString().trim() === admissionNo.toString().trim());
-            if (!row) return result;
+  // Detection Logic: Check if there's a single consolidated file for this term
+  const singleFileName = `${term}_${className}_${mappedSession}.xlsx`;
+  const singleFilePath = path.join(
+    __dirname,
+    "aReport_card",
+    mappedSession,
+    term,
+    className,
+    singleFileName,
+  );
 
-            const subjectMap = {
-                'Basic Tech': 'Basic Technology',
-                'CCA': 'Cultural and Creative Arts',
-                'French': 'Francais',
-                'Computer and ICT': 'INFO AND COMMUNICATION TECHNOLOGY',
-                'History': 'Nigerian History',
-                'PHE': 'Physical and Health Education',
-                'Yoruba': 'Yoruba Language'
-            };
+  if (fs.existsSync(singleFilePath)) {
+    try {
+      const workbook = xlsx.readFile(singleFilePath);
+      const data = xlsx.utils.sheet_to_json(
+        workbook.Sheets[workbook.SheetNames[0]],
+      );
+      const row = data.find(
+        (r) =>
+          (r.Admission_no || "").toString().trim() ===
+          admissionNo.toString().trim(),
+      );
+      if (!row) return result;
 
-            let total = 0;
-            registeredSubjects.forEach(sub => {
-                const excelSubName = subjectMap[sub] || sub;
-                const ca = parseFloat(row[`${excelSubName} (CA 40)`]) || 0;
-                const exam = parseFloat(row[`${excelSubName} (Exam 60)`]) || 0;
-                const score = ca + exam;
-                result.scores.push({ subject: sub, score });
-                total += score;
-                result.subjectsCount++;
-                if (score >= 50) result.passesCount++;
-            });
-            result.average = result.subjectsCount > 0 ? (total / result.subjectsCount) : 0;
-            return result;
-        } catch (e) { return result; }
-    } else {
-        const classFolderPath = path.join(__dirname, 'aReport_card', mappedSession, term, className);
-        if (!fs.existsSync(classFolderPath)) return result;
-        
-        let total = 0;
-        registeredSubjects.forEach(sub => {
-            const fileFriendlySub = sub.trim().replace(/\s+/g, '_');
-            const fileName = `${term}_${className}_${fileFriendlySub}.xlsx`;
-            const filePath = path.join(classFolderPath, fileName);
-            if (fs.existsSync(filePath)) {
-                try {
-                    const workbook = xlsx.readFile(filePath);
-                    const data = xlsx.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
-                    const row = data.find(r => (r.Admission_no || '').toString().trim() === admissionNo.toString().trim());
-                    if (row) {
-                        const ca = parseFloat(row['CA (40 MARKS)']) || 0;
-                        const score = ca + (parseFloat(row['MCQ (30 MARKS)']) || 0) + (parseFloat(row['THEORY (30 MARKS)']) || 0);
-                        result.scores.push({ subject: sub, score });
-                        total += score;
-                        result.subjectsCount++;
-                        if (score >= 50) result.passesCount++;
-                    }
-                } catch (e) {}
-            }
-        });
-        result.average = result.subjectsCount > 0 ? (total / result.subjectsCount) : 0;
-        return result;
+      const subjectMap = {
+        "Basic Tech": "Basic Technology",
+        CCA: "Cultural and Creative Arts",
+        French: "Francais",
+        "Computer and ICT": "INFO AND COMMUNICATION TECHNOLOGY",
+        History: "Nigerian History",
+        PHE: "Physical and Health Education",
+        Yoruba: "Yoruba Language",
+      };
+
+      let total = 0;
+      registeredSubjects.forEach((sub) => {
+        const excelSubName = subjectMap[sub] || sub;
+        const ca = parseFloat(row[`${excelSubName} (CA 40)`]) || 0;
+        const exam = parseFloat(row[`${excelSubName} (Exam 60)`]) || 0;
+        const score = ca + exam;
+        result.scores.push({ subject: sub, score });
+        total += score;
+        result.subjectsCount++;
+        const isSenior = className && (className.toUpperCase().startsWith('SSS') || className.toUpperCase().startsWith('SS'));
+        const passThreshold = isSenior ? 40 : 50;
+        if (score >= passThreshold) result.passesCount++;
+      });
+      result.average =
+        result.subjectsCount > 0 ? total / result.subjectsCount : 0;
+      return result;
+    } catch (e) {
+      return result;
     }
+  } else {
+    const classFolderPath = path.join(
+      __dirname,
+      "aReport_card",
+      mappedSession,
+      term,
+      className,
+    );
+    if (!fs.existsSync(classFolderPath)) return result;
+
+    let total = 0;
+    registeredSubjects.forEach((sub) => {
+      const fileFriendlySub = sub.trim().replace(/\s+/g, "_");
+      const fileName = `${term}_${className}_${fileFriendlySub}.xlsx`;
+      const filePath = path.join(classFolderPath, fileName);
+      if (fs.existsSync(filePath)) {
+        try {
+          const workbook = xlsx.readFile(filePath);
+          const data = xlsx.utils.sheet_to_json(
+            workbook.Sheets[workbook.SheetNames[0]],
+          );
+          const row = data.find(
+            (r) =>
+              (r.Admission_no || "").toString().trim() ===
+              admissionNo.toString().trim(),
+          );
+          if (row) {
+            const ca = parseFloat(row["CA (40 MARKS)"]) || 0;
+            const score =
+              ca +
+              (parseFloat(row["MCQ (30 MARKS)"]) || 0) +
+              (parseFloat(row["THEORY (30 MARKS)"]) || 0);
+            result.scores.push({ subject: sub, score });
+            total += score;
+            result.subjectsCount++;
+            const isSenior = className && (className.toUpperCase().startsWith('SSS') || className.toUpperCase().startsWith('SS'));
+            const passThreshold = isSenior ? 40 : 50;
+            if (score >= passThreshold) result.passesCount++;
+          }
+        } catch (e) {}
+      }
+    });
+    result.average =
+      result.subjectsCount > 0 ? total / result.subjectsCount : 0;
+    return result;
+  }
 }
 
 // Updated getTermAverage to use the new helper
-function getTermAverage(session, term, className, admissionNo, registeredSubjects) {
-    const res = getTermResult(session, term, className, admissionNo, registeredSubjects);
-    return res.average;
+function getTermAverage(
+  session,
+  term,
+  className,
+  admissionNo,
+  registeredSubjects,
+) {
+  const res = getTermResult(
+    session,
+    term,
+    className,
+    admissionNo,
+    registeredSubjects,
+  );
+  return res.average;
 }
 
 // Helper: Get School-wide Statistics for Admin
 function getAdminStats(session, term, filterClass, studentNamesMap = {}) {
-    const mappedSession = session.replace(/_and_/g, '_');
-    const stats = {
-        topStudents: [], // Overall leaderboard
-        worstStudents: [], // Needs attention leaderboard
-        subjectStats: {}, // Pass/Fail per subject
-        classAverages: {}, // Average per class
-        totalStudents: 0
-    };
+  const mappedSession = session.replace(/_and_/g, "_");
+  const stats = {
+    topStudents: [], // Overall leaderboard
+    worstStudents: [], // Needs attention leaderboard
+    subjectStats: {}, // Pass/Fail per subject
+    classAverages: {}, // Average per class
+    totalStudents: 0,
+  };
 
-    let classes = ['JSS1', 'JSS2', 'JSS3', 'SSS1', 'SSS2', 'SSS3'];
-    
-    // Filter Logic
-    if (filterClass) {
-        if (filterClass === 'JUNIOR') classes = ['JSS1', 'JSS2', 'JSS3'];
-        else if (filterClass === 'SENIOR') classes = ['SSS1', 'SSS2', 'SSS3'];
-        else classes = [filterClass];
+  let classes = ["JSS1", "JSS2", "JSS3", "SSS1", "SSS2", "SSS3"];
+
+  // Filter Logic
+  if (filterClass) {
+    if (filterClass === "JUNIOR") classes = ["JSS1", "JSS2", "JSS3"];
+    else if (filterClass === "SENIOR") classes = ["SSS1", "SSS2", "SSS3"];
+    else classes = [filterClass];
+  }
+
+  const sessionDir = path.join(__dirname, "aReport_card", mappedSession, term);
+
+  if (!fs.existsSync(sessionDir)) return stats;
+
+  const studentMap = {}; // { admission_no: { name, scores: [], total, count, class } }
+
+  classes.forEach((className) => {
+    const classPath = path.join(sessionDir, className);
+    if (!fs.existsSync(classPath)) return;
+
+    // Check for Consolidated File
+    const singleFileName = `${term}_${className}_${mappedSession}.xlsx`;
+    const singleFilePath = path.join(classPath, singleFileName);
+
+    if (fs.existsSync(singleFilePath)) {
+      try {
+        const workbook = xlsx.readFile(singleFilePath);
+        const data = xlsx.utils.sheet_to_json(
+          workbook.Sheets[workbook.SheetNames[0]],
+        );
+
+        data.forEach((row) => {
+          const adm = (row.Admission_no || "").toString().trim();
+          if (!adm) return;
+
+          if (!studentMap[adm]) {
+            // Better Name Resolution
+            const dbName = studentNamesMap[adm];
+            const excelName =
+              row.Full_Name || row.Name || row.Student_Name || adm;
+            const fullName = dbName || excelName;
+            studentMap[adm] = {
+              name: fullName,
+              scores: [],
+              total: 0,
+              count: 0,
+              class: className,
+            };
+          }
+
+          // Process all columns ending in (Exam 60) or similar to find scores
+          Object.keys(row).forEach((key) => {
+            if (key.includes("(CA 40)") || key.includes("(Exam 60)")) {
+              const subName = key.split("(")[0].trim();
+
+              const caRaw = row[`${subName} (CA 40)`];
+              const examRaw = row[`${subName} (Exam 60)`];
+
+              // Only count if student has a score entry for this subject
+              if (caRaw !== undefined || examRaw !== undefined) {
+                if (!stats.subjectStats[subName])
+                  stats.subjectStats[subName] = {
+                    passed: 0,
+                    failed: 0,
+                    total: 0,
+                    studentCount: 0,
+                  };
+
+                const caValue = parseFloat(caRaw) || 0;
+                const examValue = parseFloat(examRaw) || 0;
+                const total = caValue + examValue;
+
+                studentMap[adm].total += total;
+                studentMap[adm].count++;
+
+                stats.subjectStats[subName].total += total;
+                stats.subjectStats[subName].studentCount++;
+
+                const isSenior = className && (className.toUpperCase().startsWith('SSS') || className.toUpperCase().startsWith('SS'));
+                const passThreshold = isSenior ? 40 : 50;
+                if (total >= passThreshold) stats.subjectStats[subName].passed++;
+                else stats.subjectStats[subName].failed++;
+              }
+            }
+          });
+        });
+      } catch (e) {
+        console.error(`Admin Stats Error (${className}):`, e);
+      }
+    } else {
+      // Process Multi-file Format
+      const files = fs
+        .readdirSync(classPath)
+        .filter((f) => f.endsWith(".xlsx"));
+      files.forEach((file) => {
+        try {
+          const subName = file
+            .replace(`${term}_${className}_`, "")
+            .replace(".xlsx", "")
+            .replace(/_/g, " ");
+          const workbook = xlsx.readFile(path.join(classPath, file));
+          const data = xlsx.utils.sheet_to_json(
+            workbook.Sheets[workbook.SheetNames[0]],
+          );
+
+          if (!stats.subjectStats[subName])
+            stats.subjectStats[subName] = {
+              passed: 0,
+              failed: 0,
+              total: 0,
+              studentCount: 0,
+            };
+
+          data.forEach((row) => {
+            const adm = (row.Admission_no || "").toString().trim();
+            if (!adm) return;
+
+            const caRaw = row["CA (40 MARKS)"];
+            const mcqRaw = row["MCQ (30 MARKS)"];
+            const theoryRaw = row["THEORY (30 MARKS)"];
+
+            if (
+              caRaw !== undefined ||
+              mcqRaw !== undefined ||
+              theoryRaw !== undefined
+            ) {
+              const ca = parseFloat(caRaw) || 0;
+              const score =
+                ca + (parseFloat(mcqRaw) || 0) + (parseFloat(theoryRaw) || 0);
+
+              if (!studentMap[adm]) {
+                const dbName = studentNamesMap[adm];
+                const excelName =
+                  row.Name || row.Full_Name || row.Student_Name || adm;
+                const fullName = dbName || excelName;
+                studentMap[adm] = {
+                  name: fullName,
+                  scores: [],
+                  total: 0,
+                  count: 0,
+                  class: className,
+                };
+              }
+
+              studentMap[adm].total += score;
+              studentMap[adm].count++;
+
+              stats.subjectStats[subName].total += score;
+              stats.subjectStats[subName].studentCount++;
+
+              const isSenior = className && (className.toUpperCase().startsWith('SSS') || className.toUpperCase().startsWith('SS'));
+              const passThreshold = isSenior ? 40 : 50;
+              if (score >= passThreshold) stats.subjectStats[subName].passed++;
+              else stats.subjectStats[subName].failed++;
+            }
+          });
+        } catch (e) {}
+      });
     }
+  });
 
-    const sessionDir = path.join(__dirname, 'aReport_card', mappedSession, term);
-    
-    if (!fs.existsSync(sessionDir)) return stats;
+  // Finalize Stats with Low-Count Subject Filter
+  Object.keys(stats.subjectStats).forEach((sub) => {
+    // We removed the harsh filter here so subjects with few students (like CRS) still show up correctly
+    if (stats.subjectStats[sub].studentCount === 0) {
+      delete stats.subjectStats[sub];
+    }
+  });
 
-    const studentMap = {}; // { admission_no: { name, scores: [], total, count, class } }
+  // Finalize Stats
+  const studentList = Object.keys(studentMap).map((adm) => {
+    const s = studentMap[adm];
+    return {
+      admission_no: adm,
+      name: s.name,
+      class: s.class,
+      average: s.count > 0 ? s.total / s.count : 0,
+    };
+  });
 
-    classes.forEach(className => {
-        const classPath = path.join(sessionDir, className);
-        if (!fs.existsSync(classPath)) return;
+  // Calculate Class Averages
+  const classGroups = {};
+  studentList.forEach((s) => {
+    if (!classGroups[s.class]) classGroups[s.class] = { total: 0, count: 0 };
+    classGroups[s.class].total += s.average;
+    classGroups[s.class].count++;
+  });
 
-        // Check for Consolidated File
-        const singleFileName = `${term}_${className}_${mappedSession}.xlsx`;
-        const singleFilePath = path.join(classPath, singleFileName);
+  Object.keys(classGroups).forEach((cls) => {
+    stats.classAverages[cls] = classGroups[cls].total / classGroups[cls].count;
+  });
 
-        if (fs.existsSync(singleFilePath)) {
-            try {
-                const workbook = xlsx.readFile(singleFilePath);
-                const data = xlsx.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
-                
-                data.forEach(row => {
-                    const adm = (row.Admission_no || '').toString().trim();
-                    if (!adm) return;
-                    
-                    if (!studentMap[adm]) {
-                        // Better Name Resolution
-                        const dbName = studentNamesMap[adm];
-                        const excelName = row.Full_Name || row.Name || row.Student_Name || adm;
-                        const fullName = dbName || excelName;
-                        studentMap[adm] = { name: fullName, scores: [], total: 0, count: 0, class: className };
-                    }
+  const sortedStudents = studentList.sort((a, b) => b.average - a.average);
+  stats.topStudents = sortedStudents.slice(0, 50); // Top 50 in selection
+  stats.worstStudents = [...sortedStudents].reverse().slice(0, 50); // Bottom 50 in selection
+  stats.totalStudents = studentList.length;
 
-                    // Process all columns ending in (Exam 60) or similar to find scores
-                    Object.keys(row).forEach(key => {
-                        if (key.includes('(CA 40)') || key.includes('(Exam 60)')) {
-                            const subName = key.split('(')[0].trim();
-                            
-                            const caRaw = row[`${subName} (CA 40)`];
-                            const examRaw = row[`${subName} (Exam 60)`];
-                            
-                            // Only count if student has a score entry for this subject
-                            if (caRaw !== undefined || examRaw !== undefined) {
-                                if (!stats.subjectStats[subName]) stats.subjectStats[subName] = { passed: 0, failed: 0, total: 0, studentCount: 0 };
-                                
-                                const caValue = parseFloat(caRaw) || 0;
-                                const examValue = parseFloat(examRaw) || 0;
-                                const total = caValue + examValue;
-
-                                studentMap[adm].total += total;
-                                studentMap[adm].count++;
-                                
-                                stats.subjectStats[subName].total += total;
-                                stats.subjectStats[subName].studentCount++;
-                                
-                                if (total >= 50) stats.subjectStats[subName].passed++;
-                                else stats.subjectStats[subName].failed++;
-                            }
-                        }
-                    });
-                });
-            } catch (e) { console.error(`Admin Stats Error (${className}):`, e); }
-        } else {
-            // Process Multi-file Format
-            const files = fs.readdirSync(classPath).filter(f => f.endsWith('.xlsx'));
-            files.forEach(file => {
-                try {
-                    const subName = file.replace(`${term}_${className}_`, '').replace('.xlsx', '').replace(/_/g, ' ');
-                    const workbook = xlsx.readFile(path.join(classPath, file));
-                    const data = xlsx.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
-
-                    if (!stats.subjectStats[subName]) stats.subjectStats[subName] = { passed: 0, failed: 0, total: 0, studentCount: 0 };
-
-                    data.forEach(row => {
-                        const adm = (row.Admission_no || '').toString().trim();
-                        if (!adm) return;
-
-                        const caRaw = row['CA (40 MARKS)'];
-                        const mcqRaw = row['MCQ (30 MARKS)'];
-                        const theoryRaw = row['THEORY (30 MARKS)'];
-
-                        if (caRaw !== undefined || mcqRaw !== undefined || theoryRaw !== undefined) {
-                            const ca = parseFloat(caRaw) || 0;
-                            const score = ca + (parseFloat(mcqRaw) || 0) + (parseFloat(theoryRaw) || 0);
-
-                            if (!studentMap[adm]) {
-                                const dbName = studentNamesMap[adm];
-                                const excelName = row.Name || row.Full_Name || row.Student_Name || adm;
-                                const fullName = dbName || excelName;
-                                studentMap[adm] = { name: fullName, scores: [], total: 0, count: 0, class: className };
-                            }
-
-                            studentMap[adm].total += score;
-                            studentMap[adm].count++;
-
-                            stats.subjectStats[subName].total += score;
-                            stats.subjectStats[subName].studentCount++;
-
-                            if (score >= 50) stats.subjectStats[subName].passed++;
-                            else stats.subjectStats[subName].failed++;
-                        }
-                    });
-                } catch (e) {}
-            });
-        }
-    });
-
-    // Finalize Stats with Low-Count Subject Filter
-    Object.keys(stats.subjectStats).forEach(sub => {
-        // We removed the harsh filter here so subjects with few students (like CRS) still show up correctly
-        if (stats.subjectStats[sub].studentCount === 0) {
-             delete stats.subjectStats[sub]; 
-        }
-    });
-
-    // Finalize Stats
-    const studentList = Object.keys(studentMap).map(adm => {
-        const s = studentMap[adm];
-        return {
-            admission_no: adm,
-            name: s.name,
-            class: s.class,
-            average: s.count > 0 ? (s.total / s.count) : 0
-        };
-    });
-
-    // Calculate Class Averages
-    const classGroups = {};
-    studentList.forEach(s => {
-        if (!classGroups[s.class]) classGroups[s.class] = { total: 0, count: 0 };
-        classGroups[s.class].total += s.average;
-        classGroups[s.class].count++;
-    });
-
-    Object.keys(classGroups).forEach(cls => {
-        stats.classAverages[cls] = classGroups[cls].total / classGroups[cls].count;
-    });
-
-    const sortedStudents = studentList.sort((a, b) => b.average - a.average);
-    stats.topStudents = sortedStudents.slice(0, 50); // Top 50 in selection
-    stats.worstStudents = [...sortedStudents].reverse().slice(0, 50); // Bottom 50 in selection
-    stats.totalStudents = studentList.length;
-
-    return stats;
+  return stats;
 }
 
 // Helper: Generate Dynamic Principal Remark
-function generatePrincipalRemark(avg, scores, position, firstName) {
-    const pAvg = parseFloat(avg);
-    const cleanName = firstName ? firstName.split(' ')[0].charAt(0).toUpperCase() + firstName.split(' ')[0].slice(1).toLowerCase() : "";
-    const namePrefix = cleanName ? `${cleanName}, ` : "";
-    let remark = "";
-    
-    const greatComments = [
-        `${namePrefix}this is an exceptional work! Your dedication to your studies is truly inspiring.`,
-        `${namePrefix}a brilliant performance. You have shown remarkable consistency and intelligence.`,
-        `${namePrefix}outstanding results! Keep maintaining this high standard of excellence.`,
-        `${namePrefix}you are a star student. Your academic prowess is simply commendable.`,
-        `${namePrefix}magnificent performance. Your hard work has yielded great fruit.`,
-        `${namePrefix}an exemplary academic record. You have set a high bar for others.`,
-        `${namePrefix}truly impressive! Your focus and commitment are evident in these grades.`,
-        `${namePrefix}wonderful results. Your performance is a testament to your hard work.`,
-        `${namePrefix}exceptional! You have a bright future ahead with this level of performance.`,
-        `${namePrefix}a masterclass in academic excellence. Keep up the fantastic work.`,
-        `${namePrefix}you have exceeded all expectations. Your results are simply fantastic.`,
-        `${namePrefix}a top-tier performance. Your intellectual curiosity is highly praiseworthy.`,
-        `${namePrefix}phenomenal work! You are a pride to the school and your parents.`,
-        `${namePrefix}absolute excellence! May you continue to soar high in your academics.`,
-        `${namePrefix}very well done! You have performed admirably well this term.`,
-        `${namePrefix}impressive results. Keep pushing your limits to achieve even greater success.`
-    ];
-    
-    const fairComments = [
-        `${namePrefix}you did well, but you need to buckle down and focus more on your studies.`,
-        `${namePrefix}a fair performance. You have the potential to do much better with more focus.`,
-        `${namePrefix}good effort, but there is room for significant improvement. Buckle down!`,
-        `${namePrefix}you have passed, but you need to take your academics more seriously.`,
-        `${namePrefix}a decent attempt. Total focus and dedication will help you improve your grades.`
-    ];
+function generatePrincipalRemark(avg, scores, position, firstName, className) {
+  const pAvg = parseFloat(avg);
+  const cleanName = firstName
+    ? firstName.split(" ")[0].charAt(0).toUpperCase() +
+      firstName.split(" ")[0].slice(1).toLowerCase()
+    : "";
+  const namePrefix = cleanName ? `${cleanName}, ` : "";
+  let remark = "";
 
-    if (pAvg > 50) {
-        remark = greatComments[Math.floor(Math.random() * greatComments.length)];
+  const greatComments = [
+    `${namePrefix}this is an exceptional work! Your dedication to your studies is truly inspiring.`,
+    `${namePrefix}a brilliant performance. You have shown remarkable consistency and intelligence.`,
+    `${namePrefix}outstanding results! Keep maintaining this high standard of excellence.`,
+    `${namePrefix}you are a star student. Your academic prowess is simply commendable.`,
+    `${namePrefix}magnificent performance. Your hard work has yielded great fruit.`,
+    `${namePrefix}an exemplary academic record. You have set a high bar for others.`,
+    `${namePrefix}truly impressive! Your focus and commitment are evident in these grades.`,
+    `${namePrefix}wonderful results. Your performance is a testament to your hard work.`,
+    `${namePrefix}exceptional! You have a bright future ahead with this level of performance.`,
+    `${namePrefix}a masterclass in academic excellence. Keep up the fantastic work.`,
+    `${namePrefix}you have exceeded all expectations. Your results are simply fantastic.`,
+    `${namePrefix}a top-tier performance. Your intellectual curiosity is highly praiseworthy.`,
+    `${namePrefix}phenomenal work! You are a pride to the school and your parents.`,
+    `${namePrefix}absolute excellence! May you continue to soar high in your academics.`,
+    `${namePrefix}very well done! You have performed admirably well this term.`,
+    `${namePrefix}impressive results. Keep pushing your limits to achieve even greater success.`,
+  ];
+
+  const fairComments = [
+    `${namePrefix}you did well, but you need to buckle down and focus more on your studies.`,
+    `${namePrefix}a fair performance. You have the potential to do much better with more focus.`,
+    `${namePrefix}good effort, but there is room for significant improvement. Buckle down!`,
+    `${namePrefix}you have passed, but you need to take your academics more seriously.`,
+    `${namePrefix}a decent attempt. Total focus and dedication will help you improve your grades.`,
+  ];
+
+  if (pAvg > 50) {
+    remark = greatComments[Math.floor(Math.random() * greatComments.length)];
+  } else {
+    remark = fairComments[Math.floor(Math.random() * fairComments.length)];
+  }
+
+  // Append warning for subjects <= weak threshold
+  const isSenior = className && (className.toUpperCase().startsWith('SSS') || className.toUpperCase().startsWith('SS'));
+  const weakThreshold = isSenior ? 40 : 50;
+  const veryWeakSubs = scores
+    .filter((s) => s.total_score <= weakThreshold)
+    .map((s) => `<b>${s.subject.toUpperCase().replace(/_/g, " ")}</b>`);
+  if (veryWeakSubs.length > 0) {
+    let subjectsList = "";
+    if (veryWeakSubs.length === 1) {
+      subjectsList = veryWeakSubs[0];
     } else {
-        remark = fairComments[Math.floor(Math.random() * fairComments.length)];
+      const tempSubs = [...veryWeakSubs];
+      const last = tempSubs.pop();
+      subjectsList = tempSubs.join(", ") + " and " + last;
     }
+    remark += ` You need to work harder on ${subjectsList}.`;
+  }
 
-    // Append warning for subjects <= 50
-    const veryWeakSubs = scores.filter(s => s.total_score <= 50).map(s => `<b>${s.subject.toUpperCase().replace(/_/g, ' ')}</b>`);
-    if (veryWeakSubs.length > 0) {
-        let subjectsList = "";
-        if (veryWeakSubs.length === 1) {
-            subjectsList = veryWeakSubs[0];
-        } else {
-            const tempSubs = [...veryWeakSubs];
-            const last = tempSubs.pop();
-            subjectsList = tempSubs.join(', ') + ' and ' + last;
-        }
-        remark += ` You need to work harder on ${subjectsList}.`;
-    }
+  // Append 1st position message
+  if (position === "1st") {
+    remark +=
+      " And lastly, I want to congratulate you on being at the top of the class.";
+  }
 
-    // Append 1st position message
-    if (position === "1st") {
-        remark += " And lastly, I want to congratulate you on being at the top of the class.";
-    }
-
-    return remark;
+  return remark;
 }
 
-
 // Routes
-app.get('/', (req, res) => { res.render('login', { error: null }); });
-app.get('/login', (req, res) => { res.redirect('/'); });
+app.get("/", (req, res) => {
+  res.render("login", { error: null });
+});
+app.get("/login", (req, res) => {
+  res.redirect("/");
+});
 
-app.post('/login', (req, res) => {
-    const { admission_no, surname } = req.body;
-    
-    console.log("\n--- DETAILED LOGIN ATTEMPT ---");
-    console.log(`Adm: [${admission_no}], Surname: [${surname}]`);
+app.post("/login", (req, res) => {
+  const { admission_no, surname } = req.body;
 
-    // 1. Check for missing fields
-    if (!admission_no && !surname) {
-        return res.render('login', { error: "Both Admission Number and Surname are missing!" });
-    }
-    if (!admission_no) {
-        return res.render('login', { error: "Admission Number is missing. Please enter it." });
-    }
-    if (!surname) {
-        return res.render('login', { error: "Surname (Password) is missing. Please enter it." });
-    }
+  console.log("\n--- DETAILED LOGIN ATTEMPT ---");
+  console.log(`Adm: [${admission_no}], Surname: [${surname}]`);
 
-    const cleanAdm = admission_no.trim();
-    const cleanPass = surname.trim().toUpperCase();
+  // 1. Check for missing fields
+  if (!admission_no && !surname) {
+    return res.render("login", {
+      error: "Both Admission Number and Surname are missing!",
+    });
+  }
+  if (!admission_no) {
+    return res.render("login", {
+      error: "Admission Number is missing. Please enter it.",
+    });
+  }
+  if (!surname) {
+    return res.render("login", {
+      error: "Surname (Password) is missing. Please enter it.",
+    });
+  }
 
-    // 2. Query Database
-    db.get(`SELECT * FROM students WHERE admission_no = ?`, [cleanAdm], (err, student) => {
-        if (err) {
-            console.error("Database Login Error:", err);
-            return res.render('login', { error: "Database error occurred." });
-        }
+  const cleanAdm = admission_no.trim();
+  const cleanPass = surname.trim().toUpperCase();
 
-        // 3. Validate Admission Number
-        if (!student) {
-            console.warn(`Attempt failed: Student [${cleanAdm}] not found.`);
-            return res.render('login', { error: `Admission Number "${cleanAdm}" not found in our records.` });
-        }
+  // 2. Query Database
+  db.get(
+    `SELECT * FROM students WHERE admission_no = ?`,
+    [cleanAdm],
+    (err, student) => {
+      if (err) {
+        console.error("Database Login Error:", err);
+        return res.render("login", { error: "Database error occurred." });
+      }
 
-        // 4. Validate Surname
-        const storedHash = (student.password || '').toString().trim();
-        console.log(`Check: Input='${cleanPass}', Hash='${storedHash}'`);
+      // 3. Validate Admission Number
+      if (!student) {
+        console.warn(`Attempt failed: Student [${cleanAdm}] not found.`);
+        return res.render("login", {
+          error: `Admission Number "${cleanAdm}" not found in our records.`,
+        });
+      }
 
-        const match = bcrypt.compareSync(cleanPass, storedHash);
+      // 4. Validate Surname
+      const storedHash = (student.password || "").toString().trim();
+      console.log(`Check: Input='${cleanPass}', Hash='${storedHash}'`);
 
-        if (match) {
-            console.log(`Success: Logged in as ${student.surname}`);
-            req.session.student = student;
-            res.redirect('/dashboard');
-        } else {
-            console.warn(`Attempt failed: Incorrect surname for [${cleanAdm}].`);
-            return res.render('login', { 
-                error: `Incorrect Surname for Admission No ${cleanAdm}. Please check your spelling.` 
-            });
-        }
-    }); 
+      const match = bcrypt.compareSync(cleanPass, storedHash);
+
+      if (match) {
+        console.log(`Success: Logged in as ${student.surname}`);
+        req.session.student = student;
+        res.redirect("/dashboard");
+      } else {
+        console.warn(`Attempt failed: Incorrect surname for [${cleanAdm}].`);
+        return res.render("login", {
+          error: `Incorrect Surname for Admission No ${cleanAdm}. Please check your spelling.`,
+        });
+      }
+    },
+  );
 });
 
 // 3. Student Portal / Dashboard
-app.get('/dashboard', (req, res) => {
-    if (!req.session.student) {
-        return res.redirect('/');
-    }
-    
-    const dbStudent = req.session.student;
+app.get("/dashboard", (req, res) => {
+  if (!req.session.student) {
+    return res.redirect("/");
+  }
 
-    // Fetch all sessions for this student
-    db.all(`SELECT * FROM subjects_offered WHERE admission_no = ?`, [dbStudent.admission_no], (err, sessions) => {
-        if (err) {
-            console.error("Error fetching sessions:", err);
-            return res.send("System Error");
-        }
+  const dbStudent = req.session.student;
 
-        const student = {
-            ...dbStudent,
-            Admission_no: dbStudent.admission_no,
-            Name: `${dbStudent.surname} ${dbStudent.m_name || ''} ${dbStudent.l_name || ''}`.trim(),
-            Class: sessions.length > 0 ? sessions[sessions.length-1].class_name : 'No Class',
-            Passport: dbStudent.url,
-            passport: dbStudent.url,
-            class: sessions.length > 0 ? sessions[sessions.length-1].class_name : 'No Class'
+  // Fetch all sessions for this student
+  db.all(
+    `SELECT * FROM subjects_offered WHERE admission_no = ?`,
+    [dbStudent.admission_no],
+    (err, sessions) => {
+      if (err) {
+        console.error("Error fetching sessions:", err);
+        return res.send("System Error");
+      }
+
+      const student = {
+        ...dbStudent,
+        Admission_no: dbStudent.admission_no,
+        Name: `${dbStudent.surname} ${dbStudent.m_name || ""} ${dbStudent.l_name || ""}`.trim(),
+        Class:
+          sessions.length > 0
+            ? sessions[sessions.length - 1].class_name
+            : "No Class",
+        Passport: dbStudent.url,
+        passport: dbStudent.url,
+        class:
+          sessions.length > 0
+            ? sessions[sessions.length - 1].class_name
+            : "No Class",
+      };
+
+      // Map academic_session to match portal.ejs expectation (if needed)
+      const mappedSessions = sessions.map((s) => ({
+        ...s,
+        academic_session: s.academic_session,
+        class: s.class_name,
+      }));
+
+      res.render("portal", {
+        student: student,
+        sessions: mappedSessions,
+      });
+    },
+  );
+});
+
+app.get("/profile", (req, res) => {
+  if (!req.session.student) {
+    return res.redirect("/");
+  }
+
+  const dbStudent = req.session.student;
+
+  // Fetch all session records for grouping
+  db.all(
+    `SELECT * FROM subjects_offered WHERE admission_no = ? ORDER BY academic_session DESC`,
+    [dbStudent.admission_no],
+    (err, records) => {
+      if (err) {
+        console.error(err);
+      }
+
+      const student = {
+        ...dbStudent,
+        passport: dbStudent.url,
+        dob: formatDOB(dbStudent.dob),
+        // Use the latest class for the profile header
+        class: records.length > 0 ? records[0].class_name : "No Class",
+      };
+
+      // Pass all session records to the view
+      res.render("profile", {
+        student: student,
+        sessions: records, // renamed from subjects for clarity
+      });
+    },
+  );
+});
+
+app.get("/portal", (req, res) => {
+  res.redirect("/dashboard");
+});
+
+app.get("/audit", (req, res) => {
+  if (!req.session.student) return res.redirect("/");
+  const dbStudent = req.session.student;
+
+  db.all(
+    `SELECT * FROM subjects_offered WHERE admission_no = ? ORDER BY academic_session ASC`,
+    [dbStudent.admission_no],
+    (err, records) => {
+      if (err) {
+        console.error(err);
+        return res.send("Error loading audit data.");
+      }
+
+      const auditData = [];
+      const terms = ["First_term", "Second_term", "Third_term"];
+
+      records.forEach((record) => {
+        const sessionData = {
+          session: record.academic_session,
+          class: record.class_name,
+          totalSubjects: 0,
+          totalPassed: 0,
+          average: 0,
         };
 
-        // Map academic_session to match portal.ejs expectation (if needed)
-        const mappedSessions = sessions.map(s => ({
-            ...s,
-            academic_session: s.academic_session,
-            class: s.class_name
-        }));
+        const registeredSubjects = (record.subjects || "")
+          .split(",")
+          .filter((s) => s.trim() !== "");
+        let sessionTotalAvg = 0;
+        let termsComputed = 0;
 
-        res.render('portal', { 
-            student: student,
-            sessions: mappedSessions
-        });
-    });
-});
-
-app.get('/profile', (req, res) => {
-    if (!req.session.student) {
-        return res.redirect('/');
-    }
-
-    const dbStudent = req.session.student;
-
-// Fetch all session records for grouping
-    db.all(`SELECT * FROM subjects_offered WHERE admission_no = ? ORDER BY academic_session DESC`, 
-    [dbStudent.admission_no], (err, records) => {
-        if (err) {
-            console.error(err);
-        }
-
-        const student = {
-            ...dbStudent,
-            passport: dbStudent.url,
-            dob: formatDOB(dbStudent.dob),
-            // Use the latest class for the profile header
-            class: records.length > 0 ? records[0].class_name : 'No Class'
-        };
-
-        // Pass all session records to the view
-        res.render('profile', { 
-            student: student,
-            sessions: records // renamed from subjects for clarity
-        });
-    });
-});
-
-app.get('/portal', (req, res) => {
-    res.redirect('/dashboard');
-});
-
-app.get('/audit', (req, res) => {
-    if (!req.session.student) return res.redirect('/');
-    const dbStudent = req.session.student;
-
-    db.all(`SELECT * FROM subjects_offered WHERE admission_no = ? ORDER BY academic_session ASC`, 
-    [dbStudent.admission_no], (err, records) => {
-        if (err) {
-            console.error(err);
-            return res.send("Error loading audit data.");
-        }
-
-        const auditData = [];
-        const terms = ['First_term', 'Second_term', 'Third_term'];
-
-        records.forEach(record => {
-            const sessionData = {
-                session: record.academic_session,
-                class: record.class_name,
-                totalSubjects: 0,
-                totalPassed: 0,
-                average: 0
-            };
-
-            const registeredSubjects = (record.subjects || '').split(',').filter(s => s.trim() !== '');
-            let sessionTotalAvg = 0;
-            let termsComputed = 0;
-
-            terms.forEach(term => {
-                const termRes = getTermResult(record.academic_session, term, record.class_name, dbStudent.admission_no, registeredSubjects);
-                if (termRes.subjectsCount > 0) {
-                    sessionData.totalSubjects += termRes.subjectsCount;
-                    sessionData.totalPassed += termRes.passesCount;
-                    sessionTotalAvg += termRes.average;
-                    termsComputed++;
-                }
-            });
-
-            sessionData.average = termsComputed > 0 ? (sessionTotalAvg / termsComputed) : 0;
-            auditData.push(sessionData);
-        });
-
-        res.render('audit', {
-            student: dbStudent,
-            auditData: auditData
-        });
-    });
-});
-
-app.get('/admin', (req, res) => {
-    res.redirect('/admin/login');
-});
-
-app.get('/admin/login', (req, res) => {
-    res.render('admin_login', { error: null });
-});
-
-app.post('/admin/login', (req, res) => {
-    const { password } = req.body;
-    if (bcrypt.compareSync(password || '', ADMIN_HASH)) {
-        req.session.isAdmin = true;
-        res.redirect('/admin/dashboard');
-    } else {
-        res.render('admin_login', { error: 'Incorrect Admin Password' });
-    }
-});
-
-app.get('/admin/dashboard', adminAuth, (req, res) => {
-    const session = req.query.session || '2025_and_2026';
-    const term = req.query.term || 'First_term';
-    const filterClass = req.query.class || null;
-
-    db.all(`SELECT admission_no, surname, m_name, l_name FROM students`, [], (err, students) => {
-        const studentNamesMap = {};
-        if (students) {
-            students.forEach(st => {
-                studentNamesMap[st.admission_no] = `${st.surname || ''} ${st.m_name || ''} ${st.l_name || ''}`.trim().toUpperCase();
-            });
-        }
-
-        const stats = getAdminStats(session, term, filterClass, studentNamesMap);
-
-        res.render('admin_dashboard', {
-            stats,
-            session,
+        terms.forEach((term) => {
+          const termRes = getTermResult(
+            record.academic_session,
             term,
-            filterClass
+            record.class_name,
+            dbStudent.admission_no,
+            registeredSubjects,
+          );
+          if (termRes.subjectsCount > 0) {
+            sessionData.totalSubjects += termRes.subjectsCount;
+            sessionData.totalPassed += termRes.passesCount;
+            sessionTotalAvg += termRes.average;
+            termsComputed++;
+          }
         });
-    });
+
+        sessionData.average =
+          termsComputed > 0 ? sessionTotalAvg / termsComputed : 0;
+        auditData.push(sessionData);
+      });
+
+      res.render("audit", {
+        student: dbStudent,
+        auditData: auditData,
+      });
+    },
+  );
 });
 
-app.get('/logout', (req, res) => {
-    req.session.destroy();
-    res.redirect('/');
+app.get("/admin", (req, res) => {
+  res.redirect("/admin/login");
+});
+
+app.get("/admin/login", (req, res) => {
+  res.render("admin_login", { error: null });
+});
+
+app.post("/admin/login", (req, res) => {
+  const { password } = req.body;
+  if (bcrypt.compareSync(password || "", ADMIN_HASH)) {
+    req.session.isAdmin = true;
+    res.redirect("/admin/dashboard");
+  } else {
+    res.render("admin_login", { error: "Incorrect Admin Password" });
+  }
+});
+
+app.get("/admin/dashboard", adminAuth, (req, res) => {
+  const session = req.query.session || "2025_and_2026";
+  const term = req.query.term || "First_term";
+  const filterClass = req.query.class || null;
+
+  db.all(
+    `SELECT admission_no, surname, m_name, l_name FROM students`,
+    [],
+    (err, students) => {
+      const studentNamesMap = {};
+      if (students) {
+        students.forEach((st) => {
+          studentNamesMap[st.admission_no] =
+            `${st.surname || ""} ${st.m_name || ""} ${st.l_name || ""}`
+              .trim()
+              .toUpperCase();
+        });
+      }
+
+      const stats = getAdminStats(session, term, filterClass, studentNamesMap);
+
+      res.render("admin_dashboard", {
+        stats,
+        session,
+        term,
+        filterClass,
+      });
+    },
+  );
+});
+
+app.get("/logout", (req, res) => {
+  req.session.destroy();
+  res.redirect("/");
 });
 
 // Route to view results from Excel
-app.get('/view-result/:session/:term', (req, res) => {
-    if (!req.session.student) return res.redirect('/');
+app.get("/view-result/:session/:term", (req, res) => {
+  if (!req.session.student) return res.redirect("/");
 
-    const { session, term } = req.params;
-    const admission_no = req.session.student.admission_no;
+  const { session, term } = req.params;
+  const admission_no = req.session.student.admission_no;
 
-    // Fetch subjects and class for this student in this session
-    db.get(`SELECT * FROM subjects_offered WHERE admission_no = ? AND academic_session = ?`, 
-    [admission_no, session], (err, record) => {
-        if (err || !record) {
-            console.error(err || 'No subject record found');
-            return res.send('Result not found or not yet available for this term.');
-        }
+  // Fetch subjects and class for this student in this session
+  db.get(
+    `SELECT * FROM subjects_offered WHERE admission_no = ? AND academic_session = ?`,
+    [admission_no, session],
+    (err, record) => {
+      if (err || !record) {
+        console.error(err || "No subject record found");
+        return res.send("Result not found or not yet available for this term.");
+      }
 
-        const className = record.class_name;
-        const registeredSubjects = record.subjects.split(',');
-        const mappedSession = session.replace(/_and_/g, '_');
+      const className = record.class_name;
+      const registeredSubjects = record.subjects.split(",");
+      const mappedSession = session.replace(/_and_/g, "_");
 
-        let scores = [];
-        let grandTotal = 0;
-        let position = 'N/A';
-        const dbStudent = req.session.student;
-        let studentDetail = { 
-            ...dbStudent,
-            Name: `${dbStudent.surname} ${dbStudent.m_name || ''} ${dbStudent.l_name || ''}`.trim().toUpperCase(),
-            Sex: dbStudent.gender || 'N/A'
-        };
+      let scores = [];
+      let grandTotal = 0;
+      let position = "N/A";
+      const dbStudent = req.session.student;
+      let studentDetail = {
+        ...dbStudent,
+        Name: `${dbStudent.surname} ${dbStudent.m_name || ""} ${dbStudent.l_name || ""}`
+          .trim()
+          .toUpperCase(),
+        Sex: dbStudent.gender || "N/A",
+      };
 
-        try { // Added a try-catch block for the entire result processing
-            const singleFileName = `${term}_${className}_${mappedSession}.xlsx`;
-            const singleFilePath = path.join(__dirname, 'aReport_card', mappedSession, term, className, singleFileName);
+      try {
+        // Added a try-catch block for the entire result processing
+        const singleFileName = `${term}_${className}_${mappedSession}.xlsx`;
+        const singleFilePath = path.join(
+          __dirname,
+          "aReport_card",
+          mappedSession,
+          term,
+          className,
+          singleFileName,
+        );
 
-            if (fs.existsSync(singleFilePath)) {
-                // --- 1. Single File Format (e.g., 2025/2026 First Term) ---
-                const workbook = xlsx.readFile(singleFilePath);
-                const data = xlsx.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
-                const studentRow = data.find(row => (row.Admission_no || '').toString().trim() === admission_no.trim());
+        if (fs.existsSync(singleFilePath)) {
+          // --- 1. Single File Format (e.g., 2025/2026 First Term) ---
+          const workbook = xlsx.readFile(singleFilePath);
+          const data = xlsx.utils.sheet_to_json(
+            workbook.Sheets[workbook.SheetNames[0]],
+          );
+          const studentRow = data.find(
+            (row) =>
+              (row.Admission_no || "").toString().trim() ===
+              admission_no.trim(),
+          );
 
-                if (!studentRow) return res.send('Your results were not found in the class record.');
+          if (!studentRow)
+            return res.send("Your results were not found in the class record.");
 
-                // Map and calculate 1st term scores
-                const subjectMap = {
-                    'Basic Tech': 'Basic Technology',
-                    'CCA': 'Cultural and Creative Arts',
-                    'French': 'Francais',
-                    'Computer and ICT': 'INFO AND COMMUNICATION TECHNOLOGY',
-                    'History': 'Nigerian History',
-                    'PHE': 'Physical and Health Education',
-                    'Yoruba': 'Yoruba Language'
-                };
+          // Map and calculate 1st term scores
+          const subjectMap = {
+            "Basic Tech": "Basic Technology",
+            CCA: "Cultural and Creative Arts",
+            French: "Francais",
+            "Computer and ICT": "INFO AND COMMUNICATION TECHNOLOGY",
+            History: "Nigerian History",
+            PHE: "Physical and Health Education",
+            Yoruba: "Yoruba Language",
+          };
 
-                registeredSubjects.forEach(sub => {
-                    const excelSubName = subjectMap[sub] || sub;
-                    const ca = parseFloat(studentRow[`${excelSubName} (CA 40)`]) || 0;
-                    const exam = parseFloat(studentRow[`${excelSubName} (Exam 60)`]) || 0;
-                    const total_score = ca + exam;
+          registeredSubjects.forEach((sub) => {
+            const excelSubName = subjectMap[sub] || sub;
+            const ca = parseFloat(studentRow[`${excelSubName} (CA 40)`]) || 0;
+            const exam =
+              parseFloat(studentRow[`${excelSubName} (Exam 60)`]) || 0;
+            const total_score = ca + exam;
 
-                    // Calculate Subject Rank
-                    let scoresList = [];
-                    data.forEach(r => {
-                        if (r[`${excelSubName} (CA 40)`] !== undefined || r[`${excelSubName} (Exam 60)`] !== undefined) {
-                            const rCa = parseFloat(r[`${excelSubName} (CA 40)`]) || 0;
-                            const rExam = parseFloat(r[`${excelSubName} (Exam 60)`]) || 0;
-                            scoresList.push({ adm: (r.Admission_no || '').toString().trim(), score: rCa + rExam });
-                        }
-                    });
-                    scoresList.sort((a, b) => b.score - a.score);
-                    let currentRank = 0, lastScore = -1, rankMap = {};
-                    scoresList.forEach((s, index) => {
-                        if (s.score !== lastScore) { currentRank = index + 1; lastScore = s.score; }
-                        rankMap[s.adm] = currentRank;
-                    });
-                    
-                    const studentRank = rankMap[admission_no.trim()] ? getOrdinal(rankMap[admission_no.trim()]) : 'N/A';
-
-                    scores.push({ subject: sub, ca_score: ca, exam_score: exam, total_score: total_score, rank: studentRank });
-                    grandTotal += total_score;
+            // Calculate Subject Rank
+            let scoresList = [];
+            data.forEach((r) => {
+              if (
+                r[`${excelSubName} (CA 40)`] !== undefined ||
+                r[`${excelSubName} (Exam 60)`] !== undefined
+              ) {
+                const rCa = parseFloat(r[`${excelSubName} (CA 40)`]) || 0;
+                const rExam = parseFloat(r[`${excelSubName} (Exam 60)`]) || 0;
+                scoresList.push({
+                  adm: (r.Admission_no || "").toString().trim(),
+                  score: rCa + rExam,
                 });
+              }
+            });
+            scoresList.sort((a, b) => b.score - a.score);
+            let currentRank = 0,
+              lastScore = -1,
+              rankMap = {};
+            scoresList.forEach((s, index) => {
+              if (s.score !== lastScore) {
+                currentRank = index + 1;
+                lastScore = s.score;
+              }
+              rankMap[s.adm] = currentRank;
+            });
 
-                position = calculateClassPosition(data, admission_no);
-                // Removed Excel bio-data overrides to keep DB consistency
+            const studentRank = rankMap[admission_no.trim()]
+              ? getOrdinal(rankMap[admission_no.trim()])
+              : "N/A";
 
-            } else {
-                // --- 2. Multi-File Format (e.g., 2nd/3rd terms, or 2026/2027 First Term) ---
-                const classFolderPath = path.join(__dirname, 'aReport_card', mappedSession, term, className);
-                
-                registeredSubjects.forEach(sub => {
-                    // File naming: Second_term_JSS1_Agricultural_Science.xlsx
-                    const fileFriendlySub = sub.trim().replace(/\s+/g, '_');
-                    const fileName = `${term}_${className}_${fileFriendlySub}.xlsx`;
-                    const filePath = path.join(classFolderPath, fileName);
+            scores.push({
+              subject: sub,
+              ca_score: ca,
+              exam_score: exam,
+              total_score: total_score,
+              rank: studentRank,
+            });
+            grandTotal += total_score;
+          });
 
-                    let subScores = { subject: sub, ca_score: 0, exam_score: 0, total_score: 0, rank: 'N/A' };
+          position = calculateClassPosition(data, admission_no);
+          // Removed Excel bio-data overrides to keep DB consistency
+        } else {
+          // --- 2. Multi-File Format (e.g., 2nd/3rd terms, or 2026/2027 First Term) ---
+          const classFolderPath = path.join(
+            __dirname,
+            "aReport_card",
+            mappedSession,
+            term,
+            className,
+          );
 
-                    if (fs.existsSync(filePath)) {
-                        try {
-                            const workbook = xlsx.readFile(filePath);
-                            const sheet = workbook.Sheets[workbook.SheetNames[0]];
-                            const data = xlsx.utils.sheet_to_json(sheet);
-                            const row = data.find(r => (r.Admission_no || '').toString().trim() === admission_no.trim());
+          registeredSubjects.forEach((sub) => {
+            // File naming: Second_term_JSS1_Agricultural_Science.xlsx
+            const fileFriendlySub = sub.trim().replace(/\s+/g, "_");
+            const fileName = `${term}_${className}_${fileFriendlySub}.xlsx`;
+            const filePath = path.join(classFolderPath, fileName);
 
-                            if (row) {
-                                subScores.ca_score = parseFloat(row['CA (40 MARKS)']) || 0;
-                                const mcq = parseFloat(row['MCQ (30 MARKS)']) || 0;
-                                const theory = parseFloat(row['THEORY (30 MARKS)']) || 0;
-                                subScores.exam_score = mcq + theory;
-                                subScores.total_score = subScores.ca_score + subScores.exam_score;
-                                
-                                // Calculate Subject Rank
-                                let scoresList = [];
-                                data.forEach(r => {
-                                    if ((r.Admission_no || '').toString().trim() !== '') {
-                                        const rCa = parseFloat(r['CA (40 MARKS)']) || 0;
-                                        const rMcq = parseFloat(r['MCQ (30 MARKS)']) || 0;
-                                        const rTheory = parseFloat(r['THEORY (30 MARKS)']) || 0;
-                                        scoresList.push({ adm: (r.Admission_no || '').toString().trim(), score: rCa + rMcq + rTheory });
-                                    }
-                                });
-                                scoresList.sort((a, b) => b.score - a.score);
-                                let currentRank = 0, lastScore = -1, rankMap = {};
-                                scoresList.forEach((s, index) => {
-                                    if (s.score !== lastScore) { currentRank = index + 1; lastScore = s.score; }
-                                    rankMap[s.adm] = currentRank;
-                                });
-                                
-                                subScores.rank = rankMap[admission_no.trim()] ? getOrdinal(rankMap[admission_no.trim()]) : 'N/A';
-                                
-                                // Removed Excel bio-data overrides to keep DB consistency
-                            }
-                        } catch (e) {
-                            console.error(`Error reading ${fileName}:`, e);
-                        }
-                    }
-                    scores.push(subScores);
-                    grandTotal += subScores.total_score;
-                });
-
-                position = calculateMultiFilePosition(classFolderPath, term, className, admission_no);
-            }
-
-            const totalSubjects = scores.length;
-            const currentAvg = totalSubjects > 0 ? (grandTotal / totalSubjects).toFixed(2) : 0;
-
-            // --- Calculate averages for all terms ---
-            const t1Avg = parseFloat(getTermAverage(session, 'First_term', className, admission_no, registeredSubjects)) || 0;
-            const t2Avg = parseFloat(getTermAverage(session, 'Second_term', className, admission_no, registeredSubjects)) || 0;
-            const t3Avg = parseFloat(getTermAverage(session, 'Third_term', className, admission_no, registeredSubjects)) || 0;
-
-            // --- Term-Aware Cumulative Average ---
-            let cumulativeAvg = 0;
-            const termLower = term.toLowerCase();
-            if (termLower === 'first_term') {
-                cumulativeAvg = t1Avg.toFixed(2);
-            } else if (termLower === 'second_term') {
-                cumulativeAvg = ((t1Avg + t2Avg) / 2).toFixed(2);
-            } else {
-                cumulativeAvg = ((t1Avg + t2Avg + t3Avg) / 3).toFixed(2);
-            }
-
-            // --- Promotion Logic (3rd Term Only) ---
-            let promoMsg = '';
-            if (term.toLowerCase() === 'third_term') {
-                const classMap = {
-                    'JSS1': 'JSS2', 'JSS2': 'JSS3', 'JSS3': 'SS1',
-                    'SS1': 'SS2', 'SS2': 'SS3', 'SS3': 'GRADUATED'
-                };
-                
-                const nextClass = classMap[className.toUpperCase()] || 'the next class';
-                
-                if (className.toUpperCase() !== 'SS3') {
-                    if (parseFloat(cumulativeAvg) >= 50) {
-                        promoMsg = `Congratulations, you have been promoted to ${nextClass}`;
-                    } else {
-                        promoMsg = `You are advised to repeat ${className.toUpperCase()}`;
-                    }
-                }
-            }
-
-            // --- Read Extra Curricular Data ---
-            const extraFilePath = path.join(__dirname, 'Extra_curricular', mappedSession, term, className, `extra_${className.toLowerCase()}_${term.toLowerCase()}_${mappedSession}.xlsx`);
-            let extraData = {
-                teacher_comment: '',
-                club: studentDetail.club || 'N/A',
-                society: studentDetail.society || 'N/A',
-                punctuality: '',
-                neatness: '',
-                obedience: '',
-                honesty: '',
-                discipline: '',
-                days_opened: '',
-                days_present: '',
-                days_absent: '',
-                reason: '',
-                next_term: ''
+            let subScores = {
+              subject: sub,
+              ca_score: 0,
+              exam_score: 0,
+              total_score: 0,
+              rank: "N/A",
             };
 
-            if (fs.existsSync(extraFilePath)) {
-                try {
-                    const extraWorkbook = xlsx.readFile(extraFilePath);
-                    const extraSheetData = xlsx.utils.sheet_to_json(extraWorkbook.Sheets[extraWorkbook.SheetNames[0]]);
-                    const extraRow = extraSheetData.find(r => (r.Admission_no || '').toString().trim() === admission_no.toString().trim());
-                    if (extraRow) {
-                        extraData.teacher_comment = extraRow.teacher_comment || '';
-                        extraData.club = extraRow.club || extraData.club;
-                        extraData.society = extraRow.society || extraData.society;
-                        // Checking for undefined so '0' doesn't get overwritten
-                        extraData.punctuality = extraRow.Punctuality !== undefined ? extraRow.Punctuality : '';
-                        extraData.neatness = extraRow.Neatness !== undefined ? extraRow.Neatness : '';
-                        extraData.obedience = extraRow.Obedience !== undefined ? extraRow.Obedience : '';
-                        extraData.honesty = extraRow.Honesty !== undefined ? extraRow.Honesty : '';
-                        extraData.discipline = extraRow.Discipline !== undefined ? extraRow.Discipline : '';
-                        extraData.days_opened = extraRow.days_opened !== undefined ? extraRow.days_opened : '';
-                        extraData.days_present = extraRow.days_present !== undefined ? extraRow.days_present : '';
-                        extraData.days_absent = extraRow.days_absent !== undefined ? extraRow.days_absent : '';
-                        extraData.reason = extraRow.reason !== undefined ? extraRow.reason : '';
-                        extraData.next_term = extraRow.next_term || extraRow.Resumption_Date || '';
-                    }
-                } catch (e) {
-                    console.error(`Error reading extra curricular file:`, e);
-                }
-            }
+            if (fs.existsSync(filePath)) {
+              try {
+                const workbook = xlsx.readFile(filePath);
+                const sheet = workbook.Sheets[workbook.SheetNames[0]];
+                const data = xlsx.utils.sheet_to_json(sheet);
+                const row = data.find(
+                  (r) =>
+                    (r.Admission_no || "").toString().trim() ===
+                    admission_no.trim(),
+                );
 
-            res.render('dashboard', {
-                student: {
-                    ...studentDetail,
-                    Name: studentDetail.Name,
-                    Admission_no: admission_no,
-                    Class: className,
-                    Sex: studentDetail.Sex || 'N/A',
-                    Passport: studentDetail.url || 'default.jfif',
-                    club: extraData.club,
-                    society: extraData.society
-                },
-                extra: extraData,
-                term: term.replace(/_/g, ' '),
-                session: session.replace(/_and_/g, '/'),
-                scores: scores,
-                totalSubjects: totalSubjects,
-                grandTotal: grandTotal,
-                currentAvg: currentAvg,
-                t1Avg: t1Avg.toFixed(2), 
-                t2Avg: t2Avg.toFixed(2),
-                t3Avg: t3Avg.toFixed(2),
-                cumulativeAvg: cumulativeAvg,
-                position: position,
-                promoMsg: promoMsg,
-                finalPrincipalRemark: generatePrincipalRemark(currentAvg, scores, position, dbStudent.m_name || dbStudent.l_name)
-            });
-        } catch (excelErr) {
-            console.error(excelErr);
-            res.send('Error reading student results.');
+                if (row) {
+                  subScores.ca_score = parseFloat(row["CA (40 MARKS)"]) || 0;
+                  const mcq = parseFloat(row["MCQ (30 MARKS)"]) || 0;
+                  const theory = parseFloat(row["THEORY (30 MARKS)"]) || 0;
+                  subScores.exam_score = mcq + theory;
+                  subScores.total_score =
+                    subScores.ca_score + subScores.exam_score;
+
+                  // Calculate Subject Rank
+                  let scoresList = [];
+                  data.forEach((r) => {
+                    if ((r.Admission_no || "").toString().trim() !== "") {
+                      const rCa = parseFloat(r["CA (40 MARKS)"]) || 0;
+                      const rMcq = parseFloat(r["MCQ (30 MARKS)"]) || 0;
+                      const rTheory = parseFloat(r["THEORY (30 MARKS)"]) || 0;
+                      scoresList.push({
+                        adm: (r.Admission_no || "").toString().trim(),
+                        score: rCa + rMcq + rTheory,
+                      });
+                    }
+                  });
+                  scoresList.sort((a, b) => b.score - a.score);
+                  let currentRank = 0,
+                    lastScore = -1,
+                    rankMap = {};
+                  scoresList.forEach((s, index) => {
+                    if (s.score !== lastScore) {
+                      currentRank = index + 1;
+                      lastScore = s.score;
+                    }
+                    rankMap[s.adm] = currentRank;
+                  });
+
+                  subScores.rank = rankMap[admission_no.trim()]
+                    ? getOrdinal(rankMap[admission_no.trim()])
+                    : "N/A";
+
+                  // Removed Excel bio-data overrides to keep DB consistency
+                }
+              } catch (e) {
+                console.error(`Error reading ${fileName}:`, e);
+              }
+            }
+            scores.push(subScores);
+            grandTotal += subScores.total_score;
+          });
+
+          position = calculateMultiFilePosition(
+            classFolderPath,
+            term,
+            className,
+            admission_no,
+          );
         }
-    });
+
+        const totalSubjects = scores.length;
+        const currentAvg =
+          totalSubjects > 0 ? (grandTotal / totalSubjects).toFixed(2) : 0;
+
+        // --- Calculate averages for all terms ---
+        const t1Avg =
+          parseFloat(
+            getTermAverage(
+              session,
+              "First_term",
+              className,
+              admission_no,
+              registeredSubjects,
+            ),
+          ) || 0;
+        const t2Avg =
+          parseFloat(
+            getTermAverage(
+              session,
+              "Second_term",
+              className,
+              admission_no,
+              registeredSubjects,
+            ),
+          ) || 0;
+        const t3Avg =
+          parseFloat(
+            getTermAverage(
+              session,
+              "Third_term",
+              className,
+              admission_no,
+              registeredSubjects,
+            ),
+          ) || 0;
+
+        // --- Term-Aware Cumulative Average ---
+        let cumulativeAvg = 0;
+        const termLower = term.toLowerCase();
+        if (termLower === "first_term") {
+          cumulativeAvg = t1Avg.toFixed(2);
+        } else if (termLower === "second_term") {
+          cumulativeAvg = ((t1Avg + t2Avg) / 2).toFixed(2);
+        } else {
+          cumulativeAvg = ((t1Avg + t2Avg + t3Avg) / 3).toFixed(2);
+        }
+
+        // --- Promotion Logic (3rd Term Only) ---
+        let promoMsg = "";
+        if (term.toLowerCase() === "third_term") {
+          const classMap = {
+            JSS1: "JSS2",
+            JSS2: "JSS3",
+            JSS3: "SS1",
+            SS1: "SS2",
+            SS2: "SS3",
+            SS3: "GRADUATED",
+          };
+
+          const nextClass =
+            classMap[className.toUpperCase()] || "the next class";
+
+          if (className.toUpperCase() !== "SS3") {
+            if (parseFloat(cumulativeAvg) >= 50) {
+              promoMsg = `Congratulations, you have been promoted to ${nextClass}`;
+            } else {
+              promoMsg = `You are advised to repeat ${className.toUpperCase()}`;
+            }
+          }
+        }
+
+        // --- Read Extra Curricular Data ---
+        const extraFilePath = path.join(
+          __dirname,
+          "Extra_curricular",
+          mappedSession,
+          term,
+          className,
+          `extra_${className.toLowerCase()}_${term.toLowerCase()}_${mappedSession}.xlsx`,
+        );
+        let extraData = {
+          teacher_comment: "",
+          club: studentDetail.club || "N/A",
+          society: studentDetail.society || "N/A",
+          punctuality: "",
+          neatness: "",
+          obedience: "",
+          honesty: "",
+          discipline: "",
+          days_opened: "",
+          days_present: "",
+          days_absent: "",
+          reason: "",
+          next_term: "",
+        };
+
+        if (fs.existsSync(extraFilePath)) {
+          try {
+            const extraWorkbook = xlsx.readFile(extraFilePath);
+            const extraSheetData = xlsx.utils.sheet_to_json(
+              extraWorkbook.Sheets[extraWorkbook.SheetNames[0]],
+            );
+            const extraRow = extraSheetData.find(
+              (r) =>
+                (r.Admission_no || "").toString().trim() ===
+                admission_no.toString().trim(),
+            );
+            if (extraRow) {
+              extraData.teacher_comment = extraRow.teacher_comment || "";
+              extraData.club = extraRow.club || extraData.club;
+              extraData.society = extraRow.society || extraData.society;
+              // Checking for undefined so '0' doesn't get overwritten
+              extraData.punctuality =
+                extraRow.Punctuality !== undefined ? extraRow.Punctuality : "";
+              extraData.neatness =
+                extraRow.Neatness !== undefined ? extraRow.Neatness : "";
+              extraData.obedience =
+                extraRow.Obedience !== undefined ? extraRow.Obedience : "";
+              extraData.honesty =
+                extraRow.Honesty !== undefined ? extraRow.Honesty : "";
+              extraData.discipline =
+                extraRow.Discipline !== undefined ? extraRow.Discipline : "";
+              extraData.days_opened =
+                extraRow.days_opened !== undefined ? extraRow.days_opened : "";
+              extraData.days_present =
+                extraRow.days_present !== undefined
+                  ? extraRow.days_present
+                  : "";
+              extraData.days_absent =
+                extraRow.days_absent !== undefined ? extraRow.days_absent : "";
+              extraData.reason =
+                extraRow.reason !== undefined ? extraRow.reason : "";
+              extraData.next_term =
+                extraRow.next_term || extraRow.Resumption_Date || "";
+            }
+          } catch (e) {
+            console.error(`Error reading extra curricular file:`, e);
+          }
+        }
+
+        res.render("dashboard", {
+          student: {
+            ...studentDetail,
+            Name: studentDetail.Name,
+            Admission_no: admission_no,
+            Class: className,
+            Sex: studentDetail.Sex || "N/A",
+            Passport: studentDetail.url || "default.jfif",
+            club: extraData.club,
+            society: extraData.society,
+          },
+          extra: extraData,
+          term: term.replace(/_/g, " "),
+          session: session.replace(/_and_/g, "/"),
+          scores: scores,
+          totalSubjects: totalSubjects,
+          grandTotal: grandTotal,
+          currentAvg: currentAvg,
+          t1Avg: t1Avg.toFixed(2),
+          t2Avg: t2Avg.toFixed(2),
+          t3Avg: t3Avg.toFixed(2),
+          cumulativeAvg: cumulativeAvg,
+          position: position,
+          promoMsg: promoMsg,
+          finalPrincipalRemark: generatePrincipalRemark(
+            currentAvg,
+            scores,
+            position,
+            dbStudent.m_name || dbStudent.l_name,
+            className,
+          ),
+        });
+      } catch (excelErr) {
+        console.error(excelErr);
+        res.send("Error reading student results.");
+      }
+    },
+  );
 });
 
-
 // --- ADMIN RESULTS VIEWER ---
-app.get('/admin/results', adminAuth, (req, res) => {
-    const session = req.query.session || '2025_and_2026';
-    const term = req.query.term || 'First_term';
-    const className = req.query.class || 'JSS1';
+app.get("/admin/results", adminAuth, (req, res) => {
+  const session = req.query.session || "2025_and_2026";
+  const term = req.query.term || "First_term";
+  const className = req.query.class || "JSS1";
 
-    db.all(`
+  db.all(
+    `
         SELECT s.*, so.subjects 
         FROM students s
         JOIN subjects_offered so ON s.admission_no = so.admission_no
         WHERE so.academic_session = ? AND so.class_name = ?
         ORDER BY s.surname ASC
-    `, [session, className], (err, students) => {
-        if (err) {
-            console.error("Error fetching students for admin results:", err);
-            return res.send("System Error");
-        }
-        res.render('admin_results', {
-            students,
-            session,
-            term,
-            className
-        });
-    });
+    `,
+    [session, className],
+    (err, students) => {
+      if (err) {
+        console.error("Error fetching students for admin results:", err);
+        return res.send("System Error");
+      }
+      res.render("admin_results", {
+        students,
+        session,
+        term,
+        className,
+      });
+    },
+  );
 });
 
-app.get('/admin/view-result/:session/:term/:admission_no', adminAuth, (req, res) => {
+app.get(
+  "/admin/view-result/:session/:term/:admission_no",
+  adminAuth,
+  (req, res) => {
     const { session, term, admission_no } = req.params;
 
-    db.get(`SELECT * FROM students WHERE admission_no = ?`, [admission_no], (err, dbStudent) => {
-        if (err || !dbStudent) return res.send('Student not found');
-        
-        
-// Fetch subjects and class for this student in this session
-    db.get(`SELECT * FROM subjects_offered WHERE admission_no = ? AND academic_session = ?`, 
-    [admission_no, session], (err, record) => {
-        if (err || !record) {
-            console.error(err || 'No subject record found');
-            return res.send('Result not found or not yet available for this term.');
-        }
+    db.get(
+      `SELECT * FROM students WHERE admission_no = ?`,
+      [admission_no],
+      (err, dbStudent) => {
+        if (err || !dbStudent) return res.send("Student not found");
 
-        const className = record.class_name;
-        const registeredSubjects = record.subjects.split(',');
-        const mappedSession = session.replace(/_and_/g, '_');
+        // Fetch subjects and class for this student in this session
+        db.get(
+          `SELECT * FROM subjects_offered WHERE admission_no = ? AND academic_session = ?`,
+          [admission_no, session],
+          (err, record) => {
+            if (err || !record) {
+              console.error(err || "No subject record found");
+              return res.send(
+                "Result not found or not yet available for this term.",
+              );
+            }
 
-        let scores = [];
-        let grandTotal = 0;
-        let position = 'N/A';
-        const dbStudent = req.session.student;
-        let studentDetail = { 
-            ...dbStudent,
-            Name: `${dbStudent.surname} ${dbStudent.m_name || ''} ${dbStudent.l_name || ''}`.trim().toUpperCase(),
-            Sex: dbStudent.gender || 'N/A'
-        };
+            const className = record.class_name;
+            const registeredSubjects = record.subjects.split(",");
+            const mappedSession = session.replace(/_and_/g, "_");
 
-        try { // Added a try-catch block for the entire result processing
-            const singleFileName = `${term}_${className}_${mappedSession}.xlsx`;
-            const singleFilePath = path.join(__dirname, 'aReport_card', mappedSession, term, className, singleFileName);
+            let scores = [];
+            let grandTotal = 0;
+            let position = "N/A";
+            let studentDetail = {
+              ...dbStudent,
+              Name: `${dbStudent.surname} ${dbStudent.m_name || ""} ${dbStudent.l_name || ""}`
+                .trim()
+                .toUpperCase(),
+              Sex: dbStudent.gender || "N/A",
+            };
 
-            if (fs.existsSync(singleFilePath)) {
+            try {
+              // Added a try-catch block for the entire result processing
+              const singleFileName = `${term}_${className}_${mappedSession}.xlsx`;
+              const singleFilePath = path.join(
+                __dirname,
+                "aReport_card",
+                mappedSession,
+                term,
+                className,
+                singleFileName,
+              );
+
+              if (fs.existsSync(singleFilePath)) {
                 // --- 1. Single File Format (e.g., 2025/2026 First Term) ---
                 const workbook = xlsx.readFile(singleFilePath);
-                const data = xlsx.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
-                const studentRow = data.find(row => (row.Admission_no || '').toString().trim() === admission_no.trim());
+                const data = xlsx.utils.sheet_to_json(
+                  workbook.Sheets[workbook.SheetNames[0]],
+                );
+                const studentRow = data.find(
+                  (row) =>
+                    (row.Admission_no || "").toString().trim() ===
+                    admission_no.trim(),
+                );
 
-                if (!studentRow) return res.send('Your results were not found in the class record.');
+                if (!studentRow)
+                  return res.send(
+                    "Your results were not found in the class record.",
+                  );
 
                 // Map and calculate 1st term scores
                 const subjectMap = {
-                    'Basic Tech': 'Basic Technology',
-                    'CCA': 'Cultural and Creative Arts',
-                    'French': 'Francais',
-                    'Computer and ICT': 'INFO AND COMMUNICATION TECHNOLOGY',
-                    'History': 'Nigerian History',
-                    'PHE': 'Physical and Health Education',
-                    'Yoruba': 'Yoruba Language'
+                  "Basic Tech": "Basic Technology",
+                  CCA: "Cultural and Creative Arts",
+                  French: "Francais",
+                  "Computer and ICT": "INFO AND COMMUNICATION TECHNOLOGY",
+                  History: "Nigerian History",
+                  PHE: "Physical and Health Education",
+                  Yoruba: "Yoruba Language",
                 };
 
-                registeredSubjects.forEach(sub => {
-                    const excelSubName = subjectMap[sub] || sub;
-                    const ca = parseFloat(studentRow[`${excelSubName} (CA 40)`]) || 0;
-                    const exam = parseFloat(studentRow[`${excelSubName} (Exam 60)`]) || 0;
-                    const total_score = ca + exam;
+                registeredSubjects.forEach((sub) => {
+                  const excelSubName = subjectMap[sub] || sub;
+                  const ca =
+                    parseFloat(studentRow[`${excelSubName} (CA 40)`]) || 0;
+                  const exam =
+                    parseFloat(studentRow[`${excelSubName} (Exam 60)`]) || 0;
+                  const total_score = ca + exam;
 
-                    // Calculate Subject Rank
-                    let scoresList = [];
-                    data.forEach(r => {
-                        if (r[`${excelSubName} (CA 40)`] !== undefined || r[`${excelSubName} (Exam 60)`] !== undefined) {
-                            const rCa = parseFloat(r[`${excelSubName} (CA 40)`]) || 0;
-                            const rExam = parseFloat(r[`${excelSubName} (Exam 60)`]) || 0;
-                            scoresList.push({ adm: (r.Admission_no || '').toString().trim(), score: rCa + rExam });
-                        }
-                    });
-                    scoresList.sort((a, b) => b.score - a.score);
-                    let currentRank = 0, lastScore = -1, rankMap = {};
-                    scoresList.forEach((s, index) => {
-                        if (s.score !== lastScore) { currentRank = index + 1; lastScore = s.score; }
-                        rankMap[s.adm] = currentRank;
-                    });
-                    
-                    const studentRank = rankMap[admission_no.trim()] ? getOrdinal(rankMap[admission_no.trim()]) : 'N/A';
+                  // Calculate Subject Rank
+                  let scoresList = [];
+                  data.forEach((r) => {
+                    if (
+                      r[`${excelSubName} (CA 40)`] !== undefined ||
+                      r[`${excelSubName} (Exam 60)`] !== undefined
+                    ) {
+                      const rCa = parseFloat(r[`${excelSubName} (CA 40)`]) || 0;
+                      const rExam =
+                        parseFloat(r[`${excelSubName} (Exam 60)`]) || 0;
+                      scoresList.push({
+                        adm: (r.Admission_no || "").toString().trim(),
+                        score: rCa + rExam,
+                      });
+                    }
+                  });
+                  scoresList.sort((a, b) => b.score - a.score);
+                  let currentRank = 0,
+                    lastScore = -1,
+                    rankMap = {};
+                  scoresList.forEach((s, index) => {
+                    if (s.score !== lastScore) {
+                      currentRank = index + 1;
+                      lastScore = s.score;
+                    }
+                    rankMap[s.adm] = currentRank;
+                  });
 
-                    scores.push({ subject: sub, ca_score: ca, exam_score: exam, total_score: total_score, rank: studentRank });
-                    grandTotal += total_score;
+                  const studentRank = rankMap[admission_no.trim()]
+                    ? getOrdinal(rankMap[admission_no.trim()])
+                    : "N/A";
+
+                  scores.push({
+                    subject: sub,
+                    ca_score: ca,
+                    exam_score: exam,
+                    total_score: total_score,
+                    rank: studentRank,
+                  });
+                  grandTotal += total_score;
                 });
 
                 position = calculateClassPosition(data, admission_no);
                 // Removed Excel bio-data overrides to keep DB consistency
-
-            } else {
+              } else {
                 // --- 2. Multi-File Format (e.g., 2nd/3rd terms, or 2026/2027 First Term) ---
-                const classFolderPath = path.join(__dirname, 'aReport_card', mappedSession, term, className);
-                
-                registeredSubjects.forEach(sub => {
-                    // File naming: Second_term_JSS1_Agricultural_Science.xlsx
-                    const fileFriendlySub = sub.trim().replace(/\s+/g, '_');
-                    const fileName = `${term}_${className}_${fileFriendlySub}.xlsx`;
-                    const filePath = path.join(classFolderPath, fileName);
+                const classFolderPath = path.join(
+                  __dirname,
+                  "aReport_card",
+                  mappedSession,
+                  term,
+                  className,
+                );
 
-                    let subScores = { subject: sub, ca_score: 0, exam_score: 0, total_score: 0, rank: 'N/A' };
+                registeredSubjects.forEach((sub) => {
+                  // File naming: Second_term_JSS1_Agricultural_Science.xlsx
+                  const fileFriendlySub = sub.trim().replace(/\s+/g, "_");
+                  const fileName = `${term}_${className}_${fileFriendlySub}.xlsx`;
+                  const filePath = path.join(classFolderPath, fileName);
 
-                    if (fs.existsSync(filePath)) {
-                        try {
-                            const workbook = xlsx.readFile(filePath);
-                            const sheet = workbook.Sheets[workbook.SheetNames[0]];
-                            const data = xlsx.utils.sheet_to_json(sheet);
-                            const row = data.find(r => (r.Admission_no || '').toString().trim() === admission_no.trim());
+                  let subScores = {
+                    subject: sub,
+                    ca_score: 0,
+                    exam_score: 0,
+                    total_score: 0,
+                    rank: "N/A",
+                  };
 
-                            if (row) {
-                                subScores.ca_score = parseFloat(row['CA (40 MARKS)']) || 0;
-                                const mcq = parseFloat(row['MCQ (30 MARKS)']) || 0;
-                                const theory = parseFloat(row['THEORY (30 MARKS)']) || 0;
-                                subScores.exam_score = mcq + theory;
-                                subScores.total_score = subScores.ca_score + subScores.exam_score;
-                                
-                                // Calculate Subject Rank
-                                let scoresList = [];
-                                data.forEach(r => {
-                                    if ((r.Admission_no || '').toString().trim() !== '') {
-                                        const rCa = parseFloat(r['CA (40 MARKS)']) || 0;
-                                        const rMcq = parseFloat(r['MCQ (30 MARKS)']) || 0;
-                                        const rTheory = parseFloat(r['THEORY (30 MARKS)']) || 0;
-                                        scoresList.push({ adm: (r.Admission_no || '').toString().trim(), score: rCa + rMcq + rTheory });
-                                    }
-                                });
-                                scoresList.sort((a, b) => b.score - a.score);
-                                let currentRank = 0, lastScore = -1, rankMap = {};
-                                scoresList.forEach((s, index) => {
-                                    if (s.score !== lastScore) { currentRank = index + 1; lastScore = s.score; }
-                                    rankMap[s.adm] = currentRank;
-                                });
-                                
-                                subScores.rank = rankMap[admission_no.trim()] ? getOrdinal(rankMap[admission_no.trim()]) : 'N/A';
-                                
-                                // Removed Excel bio-data overrides to keep DB consistency
-                            }
-                        } catch (e) {
-                            console.error(`Error reading ${fileName}:`, e);
-                        }
+                  if (fs.existsSync(filePath)) {
+                    try {
+                      const workbook = xlsx.readFile(filePath);
+                      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+                      const data = xlsx.utils.sheet_to_json(sheet);
+                      const row = data.find(
+                        (r) =>
+                          (r.Admission_no || "").toString().trim() ===
+                          admission_no.trim(),
+                      );
+
+                      if (row) {
+                        subScores.ca_score =
+                          parseFloat(row["CA (40 MARKS)"]) || 0;
+                        const mcq = parseFloat(row["MCQ (30 MARKS)"]) || 0;
+                        const theory =
+                          parseFloat(row["THEORY (30 MARKS)"]) || 0;
+                        subScores.exam_score = mcq + theory;
+                        subScores.total_score =
+                          subScores.ca_score + subScores.exam_score;
+
+                        // Calculate Subject Rank
+                        let scoresList = [];
+                        data.forEach((r) => {
+                          if ((r.Admission_no || "").toString().trim() !== "") {
+                            const rCa = parseFloat(r["CA (40 MARKS)"]) || 0;
+                            const rMcq = parseFloat(r["MCQ (30 MARKS)"]) || 0;
+                            const rTheory =
+                              parseFloat(r["THEORY (30 MARKS)"]) || 0;
+                            scoresList.push({
+                              adm: (r.Admission_no || "").toString().trim(),
+                              score: rCa + rMcq + rTheory,
+                            });
+                          }
+                        });
+                        scoresList.sort((a, b) => b.score - a.score);
+                        let currentRank = 0,
+                          lastScore = -1,
+                          rankMap = {};
+                        scoresList.forEach((s, index) => {
+                          if (s.score !== lastScore) {
+                            currentRank = index + 1;
+                            lastScore = s.score;
+                          }
+                          rankMap[s.adm] = currentRank;
+                        });
+
+                        subScores.rank = rankMap[admission_no.trim()]
+                          ? getOrdinal(rankMap[admission_no.trim()])
+                          : "N/A";
+
+                        // Removed Excel bio-data overrides to keep DB consistency
+                      }
+                    } catch (e) {
+                      console.error(`Error reading ${fileName}:`, e);
                     }
-                    scores.push(subScores);
-                    grandTotal += subScores.total_score;
+                  }
+                  scores.push(subScores);
+                  grandTotal += subScores.total_score;
                 });
 
-                position = calculateMultiFilePosition(classFolderPath, term, className, admission_no);
-            }
+                position = calculateMultiFilePosition(
+                  classFolderPath,
+                  term,
+                  className,
+                  admission_no,
+                );
+              }
 
-            const totalSubjects = scores.length;
-            const currentAvg = totalSubjects > 0 ? (grandTotal / totalSubjects).toFixed(2) : 0;
+              const totalSubjects = scores.length;
+              const currentAvg =
+                totalSubjects > 0 ? (grandTotal / totalSubjects).toFixed(2) : 0;
 
-            // --- Calculate averages for all terms ---
-            const t1Avg = parseFloat(getTermAverage(session, 'First_term', className, admission_no, registeredSubjects)) || 0;
-            const t2Avg = parseFloat(getTermAverage(session, 'Second_term', className, admission_no, registeredSubjects)) || 0;
-            const t3Avg = parseFloat(getTermAverage(session, 'Third_term', className, admission_no, registeredSubjects)) || 0;
+              // --- Calculate averages for all terms ---
+              const t1Avg =
+                parseFloat(
+                  getTermAverage(
+                    session,
+                    "First_term",
+                    className,
+                    admission_no,
+                    registeredSubjects,
+                  ),
+                ) || 0;
+              const t2Avg =
+                parseFloat(
+                  getTermAverage(
+                    session,
+                    "Second_term",
+                    className,
+                    admission_no,
+                    registeredSubjects,
+                  ),
+                ) || 0;
+              const t3Avg =
+                parseFloat(
+                  getTermAverage(
+                    session,
+                    "Third_term",
+                    className,
+                    admission_no,
+                    registeredSubjects,
+                  ),
+                ) || 0;
 
-            // --- Term-Aware Cumulative Average ---
-            let cumulativeAvg = 0;
-            const termLower = term.toLowerCase();
-            if (termLower === 'first_term') {
+              // --- Term-Aware Cumulative Average ---
+              let cumulativeAvg = 0;
+              const termLower = term.toLowerCase();
+              if (termLower === "first_term") {
                 cumulativeAvg = t1Avg.toFixed(2);
-            } else if (termLower === 'second_term') {
+              } else if (termLower === "second_term") {
                 cumulativeAvg = ((t1Avg + t2Avg) / 2).toFixed(2);
-            } else {
+              } else {
                 cumulativeAvg = ((t1Avg + t2Avg + t3Avg) / 3).toFixed(2);
-            }
+              }
 
-            // --- Promotion Logic (3rd Term Only) ---
-            let promoMsg = '';
-            if (term.toLowerCase() === 'third_term') {
+              // --- Promotion Logic (3rd Term Only) ---
+              let promoMsg = "";
+              if (term.toLowerCase() === "third_term") {
                 const classMap = {
-                    'JSS1': 'JSS2', 'JSS2': 'JSS3', 'JSS3': 'SS1',
-                    'SS1': 'SS2', 'SS2': 'SS3', 'SS3': 'GRADUATED'
+                  JSS1: "JSS2",
+                  JSS2: "JSS3",
+                  JSS3: "SS1",
+                  SS1: "SS2",
+                  SS2: "SS3",
+                  SS3: "GRADUATED",
                 };
-                
-                const nextClass = classMap[className.toUpperCase()] || 'the next class';
-                
-                if (className.toUpperCase() !== 'SS3') {
-                    if (parseFloat(cumulativeAvg) >= 50) {
-                        promoMsg = `Congratulations, you have been promoted to ${nextClass}`;
-                    } else {
-                        promoMsg = `You are advised to repeat ${className.toUpperCase()}`;
-                    }
+
+                const nextClass =
+                  classMap[className.toUpperCase()] || "the next class";
+
+                if (className.toUpperCase() !== "SS3") {
+                  if (parseFloat(cumulativeAvg) >= 50) {
+                    promoMsg = `Congratulations, you have been promoted to ${nextClass}`;
+                  } else {
+                    promoMsg = `You are advised to repeat ${className.toUpperCase()}`;
+                  }
                 }
-            }
+              }
 
-            // --- Read Extra Curricular Data ---
-            const extraFilePath = path.join(__dirname, 'Extra_curricular', mappedSession, term, className, `extra_${className.toLowerCase()}_${term.toLowerCase()}_${mappedSession}.xlsx`);
-            let extraData = {
-                teacher_comment: '',
-                club: studentDetail.club || 'N/A',
-                society: studentDetail.society || 'N/A',
-                punctuality: '',
-                neatness: '',
-                obedience: '',
-                honesty: '',
-                discipline: '',
-                days_opened: '',
-                days_present: '',
-                days_absent: '',
-                reason: '',
-                next_term: ''
-            };
+              // --- Read Extra Curricular Data ---
+              const extraFilePath = path.join(
+                __dirname,
+                "Extra_curricular",
+                mappedSession,
+                term,
+                className,
+                `extra_${className.toLowerCase()}_${term.toLowerCase()}_${mappedSession}.xlsx`,
+              );
+              let extraData = {
+                teacher_comment: "",
+                club: studentDetail.club || "N/A",
+                society: studentDetail.society || "N/A",
+                punctuality: "",
+                neatness: "",
+                obedience: "",
+                honesty: "",
+                discipline: "",
+                days_opened: "",
+                days_present: "",
+                days_absent: "",
+                reason: "",
+                next_term: "",
+              };
 
-            if (fs.existsSync(extraFilePath)) {
+              if (fs.existsSync(extraFilePath)) {
                 try {
-                    const extraWorkbook = xlsx.readFile(extraFilePath);
-                    const extraSheetData = xlsx.utils.sheet_to_json(extraWorkbook.Sheets[extraWorkbook.SheetNames[0]]);
-                    const extraRow = extraSheetData.find(r => (r.Admission_no || '').toString().trim() === admission_no.toString().trim());
-                    if (extraRow) {
-                        extraData.teacher_comment = extraRow.teacher_comment || '';
-                        extraData.club = extraRow.club || extraData.club;
-                        extraData.society = extraRow.society || extraData.society;
-                        // Checking for undefined so '0' doesn't get overwritten
-                        extraData.punctuality = extraRow.Punctuality !== undefined ? extraRow.Punctuality : '';
-                        extraData.neatness = extraRow.Neatness !== undefined ? extraRow.Neatness : '';
-                        extraData.obedience = extraRow.Obedience !== undefined ? extraRow.Obedience : '';
-                        extraData.honesty = extraRow.Honesty !== undefined ? extraRow.Honesty : '';
-                        extraData.discipline = extraRow.Discipline !== undefined ? extraRow.Discipline : '';
-                        extraData.days_opened = extraRow.days_opened !== undefined ? extraRow.days_opened : '';
-                        extraData.days_present = extraRow.days_present !== undefined ? extraRow.days_present : '';
-                        extraData.days_absent = extraRow.days_absent !== undefined ? extraRow.days_absent : '';
-                        extraData.reason = extraRow.reason !== undefined ? extraRow.reason : '';
-                        extraData.next_term = extraRow.next_term || extraRow.Resumption_Date || '';
-                    }
+                  const extraWorkbook = xlsx.readFile(extraFilePath);
+                  const extraSheetData = xlsx.utils.sheet_to_json(
+                    extraWorkbook.Sheets[extraWorkbook.SheetNames[0]],
+                  );
+                  const extraRow = extraSheetData.find(
+                    (r) =>
+                      (r.Admission_no || "").toString().trim() ===
+                      admission_no.toString().trim(),
+                  );
+                  if (extraRow) {
+                    extraData.teacher_comment = extraRow.teacher_comment || "";
+                    extraData.club = extraRow.club || extraData.club;
+                    extraData.society = extraRow.society || extraData.society;
+                    // Checking for undefined so '0' doesn't get overwritten
+                    extraData.punctuality =
+                      extraRow.Punctuality !== undefined
+                        ? extraRow.Punctuality
+                        : "";
+                    extraData.neatness =
+                      extraRow.Neatness !== undefined ? extraRow.Neatness : "";
+                    extraData.obedience =
+                      extraRow.Obedience !== undefined
+                        ? extraRow.Obedience
+                        : "";
+                    extraData.honesty =
+                      extraRow.Honesty !== undefined ? extraRow.Honesty : "";
+                    extraData.discipline =
+                      extraRow.Discipline !== undefined
+                        ? extraRow.Discipline
+                        : "";
+                    extraData.days_opened =
+                      extraRow.days_opened !== undefined
+                        ? extraRow.days_opened
+                        : "";
+                    extraData.days_present =
+                      extraRow.days_present !== undefined
+                        ? extraRow.days_present
+                        : "";
+                    extraData.days_absent =
+                      extraRow.days_absent !== undefined
+                        ? extraRow.days_absent
+                        : "";
+                    extraData.reason =
+                      extraRow.reason !== undefined ? extraRow.reason : "";
+                    extraData.next_term =
+                      extraRow.next_term || extraRow.Resumption_Date || "";
+                  }
                 } catch (e) {
-                    console.error(`Error reading extra curricular file:`, e);
+                  console.error(`Error reading extra curricular file:`, e);
                 }
-            }
+              }
 
-            res.render('dashboard', {
+              res.render("dashboard", {
                 student: {
-                    ...studentDetail,
-                    Name: studentDetail.Name,
-                    Admission_no: admission_no,
-                    Class: className,
-                    Sex: studentDetail.Sex || 'N/A',
-                    Passport: studentDetail.url || 'default.jfif',
-                    club: extraData.club,
-                    society: extraData.society
+                  ...studentDetail,
+                  Name: studentDetail.Name,
+                  Admission_no: admission_no,
+                  Class: className,
+                  Sex: studentDetail.Sex || "N/A",
+                  Passport: studentDetail.url || "default.jfif",
+                  club: extraData.club,
+                  society: extraData.society,
                 },
                 extra: extraData,
-                term: term.replace(/_/g, ' '),
-                session: session.replace(/_and_/g, '/'),
+                term: term.replace(/_/g, " "),
+                session: session.replace(/_and_/g, "/"),
                 scores: scores,
                 totalSubjects: totalSubjects,
                 grandTotal: grandTotal,
                 currentAvg: currentAvg,
-                t1Avg: t1Avg.toFixed(2), 
+                t1Avg: t1Avg.toFixed(2),
                 t2Avg: t2Avg.toFixed(2),
                 t3Avg: t3Avg.toFixed(2),
                 cumulativeAvg: cumulativeAvg,
                 position: position,
                 promoMsg: promoMsg,
-                finalPrincipalRemark: generatePrincipalRemark(currentAvg, scores, position, dbStudent.m_name || dbStudent.l_name)
-            });
-        } catch (excelErr) {
-            console.error(excelErr);
-            res.send('Error reading student results.');
-        }
-    });
-});
-});
-
-
+                finalPrincipalRemark: generatePrincipalRemark(
+                  currentAvg,
+                  scores,
+                  position,
+                  dbStudent.m_name || dbStudent.l_name,
+                  className,
+                ),
+              });
+            } catch (excelErr) {
+              console.error(excelErr);
+              res.send("Error reading student results.");
+            }
+          },
+        );
+      },
+    );
+  },
+);
 
 app.listen(PORT, () => {
-    console.log(`ogbeni open the Server at http://localhost:${PORT}`);
+  console.log(`ogbeni open the Server at http://localhost:${PORT}`);
 });

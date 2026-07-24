@@ -78,37 +78,50 @@
                 <table>
                     <thead>
                         <tr>
-                            <th style="width: 45%;">SUBJECTS OFFERED</th>
-                            <th>CA (40)</th>
-                            <th>EXAM (60)</th>
-                            <th>TOTAL (100)</th>
-                            <th>GRADE</th>
-                            <th>REMARK</th>
-                            <th>RANK</th>
+                            <th style="width: 38%;">SUBJECTS OFFERED</th>
+                            <th style="width: 8%; text-align: center;">CA (40)</th>
+                            <th style="width: 10%; text-align: center;">EXAM (60)</th>
+                            <th style="width: 11%; text-align: center;">TOTAL (100)</th>
+                            <th style="width: 10%; text-align: center;">GRADE</th>
+                            <th style="width: 15%; text-align: center;">REMARK</th>
+                            <th style="width: 8%; text-align: center;">RANK</th>
                         </tr>
                     </thead>
                     <tbody>
                         <% 
+                            const isSenior = student.Class && (student.Class.toUpperCase().startsWith('SSS') || student.Class.toUpperCase().startsWith('SS'));
                             let currentTotal = 0;
                             scores.forEach(s => { 
                                 currentTotal += s.total_score;
                                 let gradeInfo;
-                                if (s.total_score >= 70) gradeInfo = { g: 'A', r: 'EXCELLENT', c: '#6a0dad' };
-                                else if (s.total_score >= 60) gradeInfo = { g: 'B', r: 'V. GOOD', c: '#2d0a4d' };
-                                else if (s.total_score >= 50) gradeInfo = { g: 'C', r: 'GOOD', c: 'green' };
-                                else if (s.total_score >= 45) gradeInfo = { g: 'D', r: 'PASS', c: 'orange' };
-                                else gradeInfo = { g: 'F', r: 'FAIL', c: 'red' };
+                                if (isSenior) {
+                                    if (s.total_score >= 75) gradeInfo = { g: 'A1', r: 'EXCELLENT', c: '#6a0dad' };
+                                    else if (s.total_score >= 71) gradeInfo = { g: 'B2', r: 'V. GOOD', c: '#2d0a4d' };
+                                    else if (s.total_score >= 65) gradeInfo = { g: 'B3', r: 'GOOD', c: '#16a34a' };
+                                    else if (s.total_score >= 61) gradeInfo = { g: 'C4', r: 'CREDIT', c: '#0ea5e9' };
+                                    else if (s.total_score >= 55) gradeInfo = { g: 'C5', r: 'CREDIT', c: '#0284c7' };
+                                    else if (s.total_score >= 50) gradeInfo = { g: 'C6', r: 'CREDIT', c: '#2563eb' };
+                                    else if (s.total_score >= 45) gradeInfo = { g: 'D7', r: 'PASS', c: '#d97706' };
+                                    else if (s.total_score >= 40) gradeInfo = { g: 'E8', r: 'PASS', c: '#ea580c' };
+                                    else gradeInfo = { g: 'F9', r: 'FAIL', c: '#dc2626' };
+                                } else {
+                                    if (s.total_score >= 70) gradeInfo = { g: 'A', r: 'EXCELLENT', c: '#6a0dad' };
+                                    else if (s.total_score >= 60) gradeInfo = { g: 'B', r: 'V. GOOD', c: '#2d0a4d' };
+                                    else if (s.total_score >= 50) gradeInfo = { g: 'C', r: 'GOOD', c: 'green' };
+                                    else if (s.total_score >= 45) gradeInfo = { g: 'D', r: 'PASS', c: 'orange' };
+                                    else gradeInfo = { g: 'F', r: 'FAIL', c: 'red' };
+                                }
                         %>
                             <tr>
                                 <td><%= s.subject.toUpperCase().replace(/_/g, ' ') %></td>
-                                <td><%= s.ca_score %></td>
-                                <td><%= s.exam_score %></td>
-                                <td style="color: <%= gradeInfo.c %>; font-weight: bold;"><%= s.total_score %></td>
-                                <td style="color: <%= gradeInfo.c %>; font-weight: bold;"><%= gradeInfo.g %></td>
-                                <td style="color: <%= gradeInfo.c %>; font-weight: bold; font-size: 8px;">
+                                <td style="text-align: center;"><%= s.ca_score %></td>
+                                <td style="text-align: center;"><%= s.exam_score %></td>
+                                <td style="color: <%= gradeInfo.c %>; font-weight: bold; text-align: center;"><%= s.total_score %></td>
+                                <td style="color: <%= gradeInfo.c %>; font-weight: bold; text-align: center;"><%= gradeInfo.g %></td>
+                                <td style="color: <%= gradeInfo.c %>; font-weight: bold; font-size: 8px; text-align: center; white-space: nowrap;">
                                     <%= gradeInfo.r %>
                                 </td>
-                                <td style="color: <%= gradeInfo.c %>; font-weight: bold;"><%= s.rank %></td>
+                                <td style="color: <%= gradeInfo.c %>; font-weight: bold; text-align: center;"><%= s.rank %></td>
                             </tr>
                         <% }) %>
                     </tbody>
@@ -127,13 +140,35 @@
                             </span>
                         </div>
                     </div>
-                    <div style="margin-top: 10px; padding-top: 8px; border-top: 1px dashed #6a0dad; font-size: 9px; color: #444; display: flex; justify-content: space-between; font-weight: bold;">
-                        <span>A: 70-100 (EXCELLENT)</span>
-                        <span>B: 60-69 (Very GOOD)</span>
-                        <span>C: 50-59 (GOOD)</span>
-                        <span>D: 45-49 (PASS)</span>
-                        <span>F: 0-44 (FAIL)</span>
-                    </div>
+                    <% if (isSenior) { %>
+                        <table style="width: 100%; border-collapse: collapse; margin-top: 10px; border: 1px solid #6a0dad; background-color: #fff; font-size: 9px; color: #444; font-weight: bold; text-align: center;">
+                            <tbody>
+                                <tr>
+                                    <td style="border: 1px solid #6a0dad; padding: 5px; width: 33.33%;">A1: 75-100 (EXCELLENT)</td>
+                                    <td style="border: 1px solid #6a0dad; padding: 5px; width: 33.33%;">B2: 71-74 (V. GOOD)</td>
+                                    <td style="border: 1px solid #6a0dad; padding: 5px; width: 33.33%;">B3: 65-70 (GOOD)</td>
+                                </tr>
+                                <tr>
+                                    <td style="border: 1px solid #6a0dad; padding: 5px;">C4: 61-64 (CREDIT)</td>
+                                    <td style="border: 1px solid #6a0dad; padding: 5px;">C5: 55-60 (CREDIT)</td>
+                                    <td style="border: 1px solid #6a0dad; padding: 5px;">C6: 50-54 (CREDIT)</td>
+                                </tr>
+                                <tr>
+                                    <td style="border: 1px solid #6a0dad; padding: 5px;">D7: 45-49 (PASS)</td>
+                                    <td style="border: 1px solid #6a0dad; padding: 5px;">E8: 40-44 (PASS)</td>
+                                    <td style="border: 1px solid #6a0dad; padding: 5px; color: #dc2626;">F9: 0-39 (FAIL)</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    <% } else { %>
+                        <div style="margin-top: 10px; padding-top: 8px; border-top: 1px dashed #6a0dad; font-size: 9px; color: #444; display: flex; justify-content: space-between; font-weight: bold;">
+                            <span>A: 70-100 (EXCELLENT)</span>
+                            <span>B: 60-69 (Very GOOD)</span>
+                            <span>C: 50-59 (GOOD)</span>
+                            <span>D: 45-49 (PASS)</span>
+                            <span>F: 0-44 (FAIL)</span>
+                        </div>
+                    <% } %>
                 </div>
             </div>
 
